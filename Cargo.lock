@@ -82,9 +82,9 @@ dependencies = [
 
 [[package]]
 name = "lk_math"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e30ce70203fc8741370be2c26a1dfd666a07034235cac79e0df32a1609219f06"
+checksum = "ae7777faed3b95cd9048c70dab3d6d5c29a97b540a0ea5878478f4f0b340df4c"
 dependencies = [
  "serde",
  "serde_arrays",
@@ -186,9 +186,9 @@ dependencies = [
 
 [[package]]
 name = "serde_arrays"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38636132857f68ec3d5f3eb121166d2af33cb55174c4d5ff645db6165cbef0fd"
+checksum = "94a16b99c5ea4fe3daccd14853ad260ec00ea043b2708d1fd1da3106dcd8d9df"
 dependencies = [
  "serde",
 ]

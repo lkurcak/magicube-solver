@@ -8,7 +8,7 @@ edition = "2024"
 
 [workspace.dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
-lk_math = "0.5.1"
+lk_math = "0.5.2"
 
 [package]
 name = "magicube-solver"
