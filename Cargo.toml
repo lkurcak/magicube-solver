@@ -1,0 +1,20 @@
+[workspace]
+members = ["."]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+lk_math = "0.5.1"
+
+[package]
+name = "magicube-solver"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+image.workspace = true
+lk_math.workspace = true
