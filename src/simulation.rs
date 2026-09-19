@@ -1,0 +1,526 @@
+//! Deterministic game simulation. Aiming pauses time; other actions advance one update.
+
+use std::cmp::Reverse;
+use std::error::Error;
+use std::fmt;
+use std::sync::Arc;
+
+/// Tile coordinates, with x increasing rightward and y increasing downward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Position {
+    pub x: isize,
+    pub y: isize,
+}
+
+impl Position {
+    fn offset(self, dx: isize, dy: isize) -> Self {
+        Self {
+            x: self.x + dx,
+            y: self.y + dy,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Direction {
+    Left,
+    Right,
+}
+
+impl Direction {
+    fn dx(self) -> isize {
+        match self {
+            Self::Left => -1,
+            Self::Right => 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlayerMode {
+    Normal,
+    Aiming,
+    /// The next update advances physics but ignores the player's action.
+    Recovering,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CubeSource {
+    Map,
+    Player,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Cube {
+    pub position: Position,
+    pub source: CubeSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Projectile {
+    pub position: Position,
+    pub direction: Direction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GameStatus {
+    Playing,
+    Won,
+    GameOver,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Tile {
+    Empty,
+    Wall,
+    Goal,
+    Skull,
+    Torch,
+    Unknown,
+}
+
+impl Tile {
+    fn symbol(self) -> char {
+        match self {
+            Self::Empty => ' ',
+            Self::Wall => '#',
+            Self::Goal => 'G',
+            Self::Skull => 'S',
+            Self::Torch => 't',
+            Self::Unknown => '?',
+        }
+    }
+}
+
+/// Static tiles shared by states derived from the same level.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Level {
+    width: usize,
+    height: usize,
+    tiles: Vec<Tile>,
+}
+
+impl Level {
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Outside the drawing is empty space, not an implicit solid boundary.
+    pub fn tile_at(&self, position: Position) -> Tile {
+        let (Ok(x), Ok(y)) = (usize::try_from(position.x), usize::try_from(position.y)) else {
+            return Tile::Empty;
+        };
+        if x < self.width && y < self.height {
+            self.tiles[y * self.width + x]
+        } else {
+            Tile::Empty
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GameInput {
+    MoveLeft,
+    MoveRight,
+    Jump,
+    /// Enter aiming mode, or cancel it without advancing time, unless recovering.
+    Shoot,
+    Wait,
+}
+
+/// Dynamic state, including the airtime needed to distinguish search states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PlayerState {
+    pub position: Position,
+    /// Updates remaining before gravity resumes (0, 1, or 2).
+    pub air_inputs_remaining: u8,
+    pub mode: PlayerMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GameState {
+    level: Arc<Level>,
+    player: PlayerState,
+    cubes: Vec<Cube>,
+    projectile: Option<Projectile>,
+    status: GameStatus,
+}
+
+impl GameState {
+    /// Parses the importer's map alphabet, with exactly one `@` player.
+    ///
+    /// `C` creates a map cube; `O` creates the player's existing cube (at most
+    /// one). Short rows are padded with empty tiles. Indentation is significant;
+    /// trailing line endings are allowed. Goals, skulls, and torches are passable
+    /// for all bodies and projectiles. Unknown tiles stop projectiles but do not
+    /// block player movement or supply ground support.
+    pub fn from_ascii(map: &str) -> Result<Self, ParseLevelError> {
+        let lines: Vec<_> = map.trim_end_matches(['\n', '\r']).lines().collect();
+        let width = lines
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0);
+        if width == 0 {
+            return Err(ParseLevelError::EmptyMap);
+        }
+
+        let mut level = Level {
+            width,
+            height: lines.len(),
+            tiles: vec![Tile::Empty; width * lines.len()],
+        };
+        let mut player_position = None;
+        let mut cubes: Vec<Cube> = Vec::new();
+        for (y, line) in lines.iter().enumerate() {
+            for (x, symbol) in line.chars().enumerate() {
+                let position = Position {
+                    x: x as isize,
+                    y: y as isize,
+                };
+                level.tiles[y * width + x] = match symbol {
+                    ' ' => Tile::Empty,
+                    '#' => Tile::Wall,
+                    'G' => Tile::Goal,
+                    'S' => Tile::Skull,
+                    't' => Tile::Torch,
+                    '?' => Tile::Unknown,
+                    'C' | 'O' => {
+                        let source = if symbol == 'C' {
+                            CubeSource::Map
+                        } else {
+                            CubeSource::Player
+                        };
+                        if source == CubeSource::Player
+                            && cubes.iter().any(|cube| cube.source == CubeSource::Player)
+                        {
+                            return Err(ParseLevelError::MultiplePlayerCubes);
+                        }
+                        cubes.push(Cube { position, source });
+                        Tile::Empty
+                    }
+                    '@' => {
+                        if player_position.replace(position).is_some() {
+                            return Err(ParseLevelError::MultiplePlayers);
+                        }
+                        Tile::Empty
+                    }
+                    _ => return Err(ParseLevelError::InvalidTile { position, symbol }),
+                };
+            }
+        }
+
+        Ok(Self {
+            level: Arc::new(level),
+            player: PlayerState {
+                position: player_position.ok_or(ParseLevelError::MissingPlayer)?,
+                air_inputs_remaining: 0,
+                mode: PlayerMode::Normal,
+            },
+            cubes,
+            projectile: None,
+            status: GameStatus::Playing,
+        })
+    }
+
+    pub fn level(&self) -> &Level {
+        &self.level
+    }
+
+    pub fn player(&self) -> PlayerState {
+        self.player
+    }
+
+    pub fn cubes(&self) -> &[Cube] {
+        &self.cubes
+    }
+
+    pub fn projectile(&self) -> Option<Projectile> {
+        self.projectile
+    }
+
+    pub fn status(&self) -> GameStatus {
+        self.status
+    }
+
+    /// Walls and both kinds of cube are solid and supply ground support.
+    pub fn is_solid(&self, position: Position) -> bool {
+        self.level.tile_at(position) == Tile::Wall
+            || self.cubes.iter().any(|cube| cube.position == position)
+    }
+
+    pub fn is_grounded(&self) -> bool {
+        self.is_solid(self.player.position.offset(0, 1))
+    }
+
+    /// Returns the next state without changing this state.
+    ///
+    /// Shoot toggles aiming without advancing time. While aiming, a valid
+    /// left/right input fires instead of walking; other inputs leave time paused.
+    /// A blocked shot keeps aiming and preserves the previous cube/projectile.
+    /// A successful shot enters Recovering: the following input only advances
+    /// physics and consumes airtime, then restores Normal mode. Use Wait for
+    /// this forced update when playing or searching for solutions.
+    /// Walking pushes any contiguous horizontal chain of cubes one tile if the
+    /// space beyond it is not solid. A blocked push leaves the whole chain in place.
+    ///
+    /// An update resolves the action, moves the projectile up to two tiles, then
+    /// applies up to two gravity substeps to player and cubes. Within each gravity
+    /// substep, lower bodies move first so stacks and falling supports stay intact.
+    /// A jump rises one tile and suspends player gravity for two more air inputs;
+    /// gravity resumes at the end of the second one. Cubes have no airtime.
+    /// The level is won when the player's cube occupies a goal after the update.
+    /// Won and game-over states ignore further inputs.
+    pub fn step(&self, input: GameInput) -> Self {
+        let mut next = self.clone();
+        if next.status != GameStatus::Playing {
+            return next;
+        }
+        let mut jumped = false;
+        if next.player.mode == PlayerMode::Recovering {
+            next.player.mode = PlayerMode::Normal;
+        } else if input == GameInput::Shoot {
+            next.player.mode = if next.player.mode == PlayerMode::Aiming {
+                PlayerMode::Normal
+            } else {
+                PlayerMode::Aiming
+            };
+            return next;
+        } else if next.player.mode == PlayerMode::Aiming {
+            let direction = match input {
+                GameInput::MoveLeft => Direction::Left,
+                GameInput::MoveRight => Direction::Right,
+                _ => return next,
+            };
+            if !next.try_shoot(direction) {
+                return next;
+            }
+            next.player.mode = PlayerMode::Recovering;
+        } else {
+            match input {
+                GameInput::MoveLeft => {
+                    next.try_walk(Direction::Left);
+                }
+                GameInput::MoveRight => {
+                    next.try_walk(Direction::Right);
+                }
+                GameInput::Jump if next.is_grounded() && next.try_move(0, -1) => {
+                    next.player.air_inputs_remaining = 2;
+                    jumped = true;
+                }
+                GameInput::Jump | GameInput::Shoot | GameInput::Wait => {}
+            }
+        }
+
+        next.advance_projectile();
+        if !jumped {
+            if next.is_grounded() {
+                next.player.air_inputs_remaining = 0;
+            } else {
+                next.player.air_inputs_remaining =
+                    next.player.air_inputs_remaining.saturating_sub(1);
+            }
+        }
+        next.apply_gravity(!jumped && next.player.air_inputs_remaining == 0);
+        if next.is_grounded() {
+            next.player.air_inputs_remaining = 0;
+        }
+        if next.status == GameStatus::Playing
+            && next.cubes.iter().any(|cube| {
+                cube.source == CubeSource::Player && next.level.tile_at(cube.position) == Tile::Goal
+            })
+        {
+            next.status = GameStatus::Won;
+        }
+        next
+    }
+
+    fn blocks_projectile(&self, position: Position) -> bool {
+        !matches!(
+            self.level.tile_at(position),
+            Tile::Empty | Tile::Goal | Tile::Skull | Tile::Torch
+        ) || self.is_solid(position)
+            || position == self.player.position
+    }
+
+    fn try_shoot(&mut self, direction: Direction) -> bool {
+        let adjacent = self.player.position.offset(direction.dx(), 0);
+        // Validate before removing anything: a blocked shot preserves the world.
+        if self.blocks_projectile(adjacent) {
+            return false;
+        }
+        self.cubes.retain(|cube| cube.source == CubeSource::Map);
+        self.projectile = Some(Projectile {
+            position: self.player.position,
+            direction,
+        });
+        true
+    }
+
+    fn advance_projectile(&mut self) {
+        let Some(mut projectile) = self.projectile.take() else {
+            return;
+        };
+        for _ in 0..2 {
+            let target = projectile.position.offset(projectile.direction.dx(), 0);
+            if self.blocks_projectile(target) {
+                self.cubes.push(Cube {
+                    position: projectile.position,
+                    source: CubeSource::Player,
+                });
+                if projectile.position == self.player.position {
+                    self.status = GameStatus::GameOver;
+                }
+                return;
+            }
+            projectile.position = target;
+        }
+        self.projectile = Some(projectile);
+    }
+
+    fn apply_gravity(&mut self, player_falls: bool) {
+        for _ in 0..2 {
+            // None identifies the player; Some(index) identifies a cube.
+            let mut bodies: Vec<_> = self
+                .cubes
+                .iter()
+                .enumerate()
+                .map(|(index, cube)| (cube.position.y, Some(index)))
+                .collect();
+            bodies.push((self.player.position.y, None));
+            bodies.sort_by_key(|(y, _)| Reverse(*y));
+            for (_, body) in bodies {
+                if self.status == GameStatus::GameOver {
+                    return;
+                }
+                match body {
+                    None if player_falls => {
+                        self.try_move(0, 1);
+                    }
+                    Some(index) => {
+                        let target = self.cubes[index].position.offset(0, 1);
+                        if !self.is_solid(target) {
+                            self.cubes[index].position = target;
+                            if target == self.player.position {
+                                self.status = GameStatus::GameOver;
+                            }
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+
+    /// Renders the original level rectangle with the player overlaid.
+    ///
+    /// An out-of-bounds player is omitted; its position remains available through
+    /// `player()`. Dynamic cubes and the projectile are included.
+    pub fn to_ascii(&self) -> String {
+        (0..self.level.height)
+            .map(|y| {
+                (0..self.level.width)
+                    .map(|x| {
+                        let position = Position {
+                            x: x as isize,
+                            y: y as isize,
+                        };
+                        self.symbol_at(position)
+                    })
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The same one-character representation used in level files and the UI.
+    pub fn symbol_at(&self, position: Position) -> char {
+        if self.player.position == position {
+            '@'
+        } else if let Some(cube) = self.cubes.iter().find(|cube| cube.position == position) {
+            match cube.source {
+                CubeSource::Map => 'C',
+                CubeSource::Player => 'O',
+            }
+        } else if let Some(projectile) = self.projectile.filter(|p| p.position == position) {
+            match projectile.direction {
+                Direction::Left => '<',
+                Direction::Right => '>',
+            }
+        } else {
+            self.level.tile_at(position).symbol()
+        }
+    }
+
+    fn try_walk(&mut self, direction: Direction) -> bool {
+        let dx = direction.dx();
+        let destination = self.player.position.offset(dx, 0);
+        let mut target = destination;
+        let mut chain = Vec::new();
+        // Check the entire chain before moving anything. Only walking pushes;
+        // jumping and gravity still use ordinary solid-tile collision checks.
+        loop {
+            if self.level.tile_at(target) == Tile::Wall {
+                return false;
+            }
+            match self.cubes.iter().position(|cube| cube.position == target) {
+                Some(index) => {
+                    chain.push(index);
+                    target = target.offset(dx, 0);
+                }
+                None => break,
+            }
+        }
+        for index in chain {
+            self.cubes[index].position = self.cubes[index].position.offset(dx, 0);
+        }
+        self.player.position = destination;
+        true
+    }
+
+    fn try_move(&mut self, dx: isize, dy: isize) -> bool {
+        let position = self.player.position.offset(dx, dy);
+        if self.is_solid(position) {
+            return false;
+        }
+        self.player.position = position;
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseLevelError {
+    EmptyMap,
+    MissingPlayer,
+    MultiplePlayers,
+    MultiplePlayerCubes,
+    InvalidTile { position: Position, symbol: char },
+}
+
+impl fmt::Display for ParseLevelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyMap => write!(f, "level map is empty"),
+            Self::MissingPlayer => write!(f, "level map needs one '@' player"),
+            Self::MultiplePlayers => write!(f, "level map contains multiple '@' players"),
+            Self::MultiplePlayerCubes => {
+                write!(f, "level map contains multiple player cubes ('O')")
+            }
+            Self::InvalidTile { position, symbol } => {
+                write!(
+                    f,
+                    "invalid tile {symbol:?} at ({}, {})",
+                    position.x, position.y
+                )
+            }
+        }
+    }
+}
+
+impl Error for ParseLevelError {}

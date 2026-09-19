@@ -1,0 +1,12 @@
+[package]
+name = "magicube-play"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+crossterm.workspace = true
+directories.workspace = true
+magicube-solver = { path = "../.." }
+serde.workspace = true
+serde_json.workspace = true
