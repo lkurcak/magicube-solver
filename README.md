@@ -15,11 +15,13 @@ Generate maps under the ignored `data/levels/` directory:
 cargo run --bin screenshots-to-maps
 ```
 
-Run the solver prototype:
+Print level 1 with the original prototype binary:
 
 ```sh
 cargo run --bin magicube-solver
 ```
+
+The search engine is available through the Rust library API described below.
 
 Open the interactive level selector for the bundled levels:
 
@@ -110,6 +112,59 @@ cargo test --workspace
 See [`data/tile-templates/README.md`](data/tile-templates/README.md) for the
 template and manual-label workflow.
 
+## Solver library
+
+`solve` searches from any `GameState`, including one that is already aiming or
+recovering, and leaves it unchanged:
+
+```rust
+use magicube_solver::{GameState, GameStatus, SolveOptions, SolveOutcome, solve};
+
+let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
+let result = solve(&initial, SolveOptions::default());
+match result.outcome {
+    SolveOutcome::Solved(inputs) => {
+        println!("Solved in {} inputs: {inputs:?}", inputs.len());
+        let won = inputs.into_iter().fold(initial, |state, input| state.step(input));
+        assert_eq!(won.status(), GameStatus::Won);
+    }
+    SolveOutcome::Unsolvable => println!("No winning sequence exists"),
+    SolveOutcome::StateLimitReached => println!("Search incomplete; increase the state limit"),
+}
+println!("Search statistics: {:?}", result.stats);
+```
+
+The synchronous, single-threaded breadth-first search returns a shortest sequence
+of `GameInput` entries. Every entry costs one, including entering/cancelling aim
+and forced recovery (recorded explicitly as `Wait`). This minimizes recorded
+inputs, not elapsed simulation updates. Equally short solutions are selected
+deterministically using left, right, jump, shoot, wait order; recovery always uses
+wait. Returned inputs replay directly through `GameState::step`.
+
+The default cap is one million distinct retained states, including the initial
+state and any discovered win. Set `SolveOptions { max_states: Some(2_000_000) }`
+to raise it, or `SolveOptions { max_states: None }` to remove it. A zero cap stops
+immediately. Already-won states return an empty solution and game-over states
+return `Unsolvable`, regardless of the cap; both require no search.
+
+`Unsolvable` means the reachable search space was exhausted (or the initial state
+was game over). `StateLimitReached` makes no claim about solvability. Open maps
+allow objects to travel indefinitely outside the drawing, so searches without a
+cap may never finish and can consume unbounded memory. Search does not clip
+coordinates or change the simulator's rules.
+
+`SolveStats` reports `discovered_states` (distinct retained states, excluding
+discarded game-over successors) and `expanded_states` (states whose successor
+generation began, including a partially processed final state). Terminal starts
+and a zero-cap search report zero for both counts.
+
+The normal test suite solves and replays bundled levels 1–3. To run only those
+regressions with optimizations and display their search counts:
+
+```sh
+cargo test --release --locked --test solver solves_bundled -- --nocapture
+```
+
 ## Game simulation
 
 ```rust
@@ -125,8 +180,8 @@ println!("{}", next.to_ascii());
 
 `GameState::step` returns a new state and leaves its input unchanged. States share
 an immutable `Level`; dynamic state includes the player, aiming/recovery mode, cubes,
-projectile, and game status. Equality and hashing include all of these for
-future solver searches.
+projectile, and game status. Equality and hashing include all of these. The solver
+compares the complete dynamic state while omitting the shared level from hashing.
 
 Movement updates work as follows:
 

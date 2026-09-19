@@ -43,6 +43,14 @@ const BUNDLED_LEVELS: &[BundledLevel] = &[
         map: include_str!("../../../data/level-manual-labels/4.txt"),
     },
     BundledLevel {
+        name: "Level 5",
+        map: include_str!("../../../data/level-manual-labels/5.txt"),
+    },
+    BundledLevel {
+        name: "Level 6",
+        map: include_str!("../../../data/level-manual-labels/6.txt"),
+    },
+    BundledLevel {
         name: "Level 7",
         map: include_str!("../../../data/level-manual-labels/7.txt"),
     },

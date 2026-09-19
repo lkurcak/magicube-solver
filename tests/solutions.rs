@@ -54,3 +54,38 @@ fn saved_solution_wins_level_3() {
          left shoot right wait right right jump right",
     );
 }
+
+#[test]
+fn saved_solution_wins_level_4() {
+    assert_solution_wins(
+        include_str!("../data/level-manual-labels/4.txt"),
+        "right right right jump right right jump right right shoot left wait
+         jump left left left right right shoot right wait left right shoot
+         left wait jump left jump left jump left left right right right right
+         shoot right wait left right shoot left wait left left left left right
+         right right",
+    );
+}
+
+#[test]
+fn saved_solution_wins_level_5() {
+    assert_solution_wins(
+        include_str!("../data/level-manual-labels/5.txt"),
+        "jump right right right right right left left left left shoot left
+         wait left left left jump left shoot right wait right right right
+         right right right right right jump right shoot left wait jump left
+         jump left jump left left left right right right right right shoot
+         right wait right left left left left left left left left jump left
+         shoot left wait jump left jump left shoot left",
+    );
+}
+
+#[test]
+fn saved_solution_wins_level_6() {
+    assert_solution_wins(
+        include_str!("../data/level-manual-labels/6.txt"),
+        "right jump right right shoot right wait right jump right right left
+         left left jump left left jump left shoot right wait right jump right
+         right left right shoot left wait left left left",
+    );
+}
