@@ -73,6 +73,8 @@ pub enum GameStatus {
 pub enum Tile {
     Empty,
     Wall,
+    Gate,
+    PressurePlate,
     Goal,
     Skull,
     Torch,
@@ -84,6 +86,8 @@ impl Tile {
         match self {
             Self::Empty => ' ',
             Self::Wall => '#',
+            Self::Gate => 'D',
+            Self::PressurePlate => 'P',
             Self::Goal => 'G',
             Self::Skull => 'S',
             Self::Torch => 't',
@@ -185,6 +189,8 @@ impl GameState {
                 level.tiles[y * width + x] = match symbol {
                     ' ' => Tile::Empty,
                     '#' => Tile::Wall,
+                    'D' => Tile::Gate,
+                    'P' => Tile::PressurePlate,
                     'G' => Tile::Goal,
                     'S' => Tile::Skull,
                     't' => Tile::Torch,
@@ -247,10 +253,26 @@ impl GameState {
         self.status
     }
 
-    /// Walls and both kinds of cube are solid and supply ground support.
+    /// Walls, closed gates, and both kinds of cube are solid and supply ground support.
     pub fn is_solid(&self, position: Position) -> bool {
-        self.level.tile_at(position) == Tile::Wall
-            || self.cubes.iter().any(|cube| cube.position == position)
+        self.is_solid_tile(position) || self.cubes.iter().any(|cube| cube.position == position)
+    }
+
+    /// Pressure plates are active while occupied by the player or either kind of cube.
+    pub fn pressure_plates_active(&self) -> bool {
+        self.level.tile_at(self.player.position) == Tile::PressurePlate
+            || self
+                .cubes
+                .iter()
+                .any(|cube| self.level.tile_at(cube.position) == Tile::PressurePlate)
+    }
+
+    fn is_solid_tile(&self, position: Position) -> bool {
+        match self.level.tile_at(position) {
+            Tile::Wall => true,
+            Tile::Gate => self.pressure_plates_active(),
+            _ => false,
+        }
     }
 
     pub fn is_grounded(&self) -> bool {
@@ -342,7 +364,7 @@ impl GameState {
     fn blocks_projectile(&self, position: Position) -> bool {
         !matches!(
             self.level.tile_at(position),
-            Tile::Empty | Tile::Goal | Tile::Skull | Tile::Torch
+            Tile::Empty | Tile::Gate | Tile::PressurePlate | Tile::Goal | Tile::Skull | Tile::Torch
         ) || self.is_solid(position)
             || position == self.player.position
     }
@@ -466,7 +488,7 @@ impl GameState {
         // Check the entire chain before moving anything. Only walking pushes;
         // jumping and gravity still use ordinary solid-tile collision checks.
         loop {
-            if self.level.tile_at(target) == Tile::Wall {
+            if self.is_solid_tile(target) {
                 return false;
             }
             match self.cubes.iter().position(|cube| cube.position == target) {

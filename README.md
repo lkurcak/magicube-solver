@@ -46,11 +46,11 @@ key uses the terminal's normal key repeat. Resizing redraws without advancing ti
 | Left / A | Move or push left |
 | Right / D | Move or push right |
 | Z | Jump |
-| Down / S / . | Wait one update |
+| S / . | Wait one update |
 | X | Enter aiming mode, or cancel it |
 | Left / Right while aiming | Fire without moving sideways |
-| U / Backspace | Undo one action, including its automatic recovery, cubes, projectiles, and airtime |
-| R | Restart the level |
+| Down / U / Backspace | Undo one action, including its automatic recovery, cubes, projectiles, and airtime |
+| Hold Up / R | Restart the level |
 | P | Save the current input sequence, including partial attempts |
 | Q / Esc / Ctrl-C | Quit |
 
@@ -60,6 +60,8 @@ Passing a level file on the command line skips the selector.
 
 The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
+`P` is a pressure plate and `D` is a gate. Gates are normally passable, but become
+solid while the player or either kind of cube occupies a pressure plate.
 A falling cube crushing the player forces undo or restart before further play.
 Place your `O` cube on `G` to win; the victory screen supports undo and restart too.
 The view follows the
@@ -128,7 +130,7 @@ future solver searches.
 
 Movement updates work as follows:
 
-- Left/right attempt to move one tile. `#` walls and both kinds of cube are solid
+- Left/right attempt to move one tile. `#` walls, closed `D` gates, and both kinds of cube are solid
   and support the player. Walking into a cube pushes the entire contiguous row
   of cubes one tile, provided the space beyond it is not solid. There is no limit
   on chain length, and a wall blocks the whole push. Pushed cubes then fall normally.
@@ -141,10 +143,15 @@ Movement updates work as follows:
   solid obstacle before each tile. Landing ends any remaining airtime.
 - `Wait` advances time without horizontal movement.
 
+`P` pressure plates are passable. While the player or any cube occupies any
+pressure plate, every `D` gate behaves like a wall for movement, gravity, and
+projectiles. Otherwise gates are passable.
+
 `Shoot` toggles aiming without advancing time. While aiming, left/right attempts
 to fire and other movement inputs are ignored. A blocked shot stays in aiming mode
 and preserves the previous cube and projectile. The adjacent tile must be
-unoccupied and passable before firing (empty, goal, torch, or skull).
+unoccupied and passable before firing (empty, goal, torch, skull, pressure plate,
+or an inactive gate).
 A successful shot immediately removes the
 previous `O` cube and replaces any previous projectile, leaving map cubes intact.
 
@@ -173,6 +180,6 @@ leaving the map has no special effect yet. Torches and skulls are decorative for
 now and do not affect movement, projectiles, or gravity. `to_ascii()`
 renders only the original map rectangle, so use `player().position` to inspect a
 player outside it.
-Maps require exactly one `@` and can include map cubes (`C`) and at most one
-existing player cube (`O`). Ragged rows are padded with empty tiles, matching the
-screenshot importer's format.
+Maps require exactly one `@` and can include map cubes (`C`), at most one existing
+player cube (`O`), gates (`D`), and pressure plates (`P`). Ragged rows are padded
+with empty tiles, matching the screenshot importer's format.

@@ -15,7 +15,7 @@ use std::time::Duration;
 use crossterm::event::{self, Event};
 use magicube_solver::{GameState, GameStatus};
 
-use app::{App, Command, Notification};
+use app::{App, Command, Notification, RestartHold};
 use cli::Options;
 use terminal::TerminalSession;
 
@@ -42,6 +42,10 @@ const BUNDLED_LEVELS: &[BundledLevel] = &[
         name: "Level 4",
         map: include_str!("../../../data/level-manual-labels/4.txt"),
     },
+    BundledLevel {
+        name: "Level 7",
+        map: include_str!("../../../data/level-manual-labels/7.txt"),
+    },
 ];
 const SHOT_RECOVERY_DELAY: Duration = Duration::from_millis(120);
 const HELP: &str = "Usage: magicube-play [--solutions-dir PATH] [LEVEL.txt]
@@ -54,10 +58,11 @@ Successful shots automatically advance one recovery update after a brief pause.
   Left / A          Move or push left
   Right / D         Move or push right
   Z                 Jump
-  Down / S / .      Wait (advance one update)
+  S / .             Wait (advance one update)
   X                 Aim / cancel; Left or Right fires while aiming
-  U / Backspace     Undo one action (shot and recovery together)
-  R                 Restart the level
+  Down / U / Backspace
+                    Undo one action (shot and recovery together)
+  Hold Up / R       Restart the level
   P                 Save current inputs (including partial attempts)
   Q / Esc / Ctrl-C  Quit
   -h / --help       Show this help
@@ -115,6 +120,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut last_saved_path = None;
     let mut previous_status = app.state.status();
     let mut save_requested = false;
+    let mut restart_hold = RestartHold::default();
     'game: loop {
         let status = app.state.status();
         // Save once on entering victory, including wins during automatic recovery.
@@ -150,24 +156,31 @@ fn run() -> Result<(), Box<dyn Error>> {
             // too, since some terminals miss resize notifications. Neither
             // a timeout nor a resize advances the simulation.
             if !event::poll(Duration::from_millis(250))? {
+                restart_hold.expire();
                 if crossterm::terminal::size()? != size {
                     break;
                 }
                 continue;
             }
             match event::read()? {
-                Event::Key(key) => match app::command_for_key(key) {
-                    Some(Command::Quit) => break 'game,
-                    Some(Command::Save) => {
-                        save_requested = true;
+                Event::Key(key) => {
+                    if restart_hold.handle_key(key) {
+                        app.apply(Command::Restart);
                         break;
                     }
-                    Some(command) => {
-                        app.apply(command);
-                        break;
+                    match app::command_for_key(key) {
+                        Some(Command::Quit) => break 'game,
+                        Some(Command::Save) => {
+                            save_requested = true;
+                            break;
+                        }
+                        Some(command) => {
+                            app.apply(command);
+                            break;
+                        }
+                        None => {}
                     }
-                    None => {}
-                },
+                }
                 Event::Resize(_, _) => break,
                 _ => {}
             }

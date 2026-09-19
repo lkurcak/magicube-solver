@@ -74,14 +74,14 @@ pub fn draw(
         out,
         3,
         width,
-        "A/D or Left/Right: move/push | Z: jump | S/Down/.: wait",
+        "A/D or Left/Right: move/push | Z: jump | S/.: wait",
         Color::Grey,
     )?;
     line(
         out,
         4,
         width,
-        "X: aim/cancel | U: undo | R: restart | P: save | Q/Esc: quit",
+        "X: aim | Down/U: undo | Hold Up/R: restart | P: save | Q: quit",
         Color::Grey,
     )?;
     if app.state.status() == GameStatus::Won {
@@ -160,6 +160,9 @@ pub fn draw(
                 '@' if app.state.status() == GameStatus::GameOver => Color::Red,
                 '@' => Color::Cyan,
                 '#' => Color::Grey,
+                'D' if app.state.pressure_plates_active() => Color::White,
+                'D' => Color::DarkGrey,
+                'P' => Color::Yellow,
                 'C' => Color::Blue,
                 'O' if level.tile_at(position) == Tile::Goal => Color::Green,
                 'O' => Color::Magenta,

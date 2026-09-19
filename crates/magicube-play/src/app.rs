@@ -1,5 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use magicube_solver::{GameInput, GameState, GameStatus, PlayerMode};
+use std::time::{Duration, Instant};
+
+const RESTART_HOLD_DURATION: Duration = Duration::from_millis(800);
+const RESTART_REPEAT_GAP: Duration = Duration::from_millis(800);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -26,13 +30,72 @@ pub fn command_for_key(key: KeyEvent) -> Option<Command> {
         KeyCode::Left | KeyCode::Char('a' | 'A') => Some(Command::Step(GameInput::Left)),
         KeyCode::Right | KeyCode::Char('d' | 'D') => Some(Command::Step(GameInput::Right)),
         KeyCode::Char('z' | 'Z') => Some(Command::Step(GameInput::Jump)),
-        KeyCode::Down | KeyCode::Char('s' | 'S' | '.') => Some(Command::Step(GameInput::Wait)),
+        KeyCode::Char('s' | 'S' | '.') => Some(Command::Step(GameInput::Wait)),
+        KeyCode::Down => Some(Command::Undo),
         KeyCode::Char('x' | 'X') => Some(Command::Step(GameInput::Shoot)),
         KeyCode::Backspace | KeyCode::Char('u' | 'U') => Some(Command::Undo),
         KeyCode::Char('r' | 'R') => Some(Command::Restart),
         KeyCode::Char('p' | 'P') if key.kind != KeyEventKind::Repeat => Some(Command::Save),
         KeyCode::Esc | KeyCode::Char('q' | 'Q') => Some(Command::Quit),
         _ => None,
+    }
+}
+
+/// Recognizes a held Up arrow from the terminal's key-repeat stream. Requiring
+/// several events as well as elapsed time keeps an ordinary tap harmless.
+#[derive(Debug, Default)]
+pub struct RestartHold {
+    started: Option<Instant>,
+    last_event: Option<Instant>,
+    events: usize,
+}
+
+impl RestartHold {
+    pub fn handle_key(&mut self, key: KeyEvent) -> bool {
+        self.handle_key_at(key, Instant::now())
+    }
+
+    fn handle_key_at(&mut self, key: KeyEvent, now: Instant) -> bool {
+        let up = key.code == KeyCode::Up
+            && (key.modifiers - KeyModifiers::SHIFT).is_empty()
+            && key.kind != KeyEventKind::Release;
+        if !up {
+            self.reset();
+            return false;
+        }
+
+        if self
+            .last_event
+            .is_none_or(|last| now.duration_since(last) > RESTART_REPEAT_GAP)
+        {
+            self.started = Some(now);
+            self.events = 0;
+        }
+        self.last_event = Some(now);
+        self.events += 1;
+
+        let held_long_enough = now.duration_since(self.started.unwrap()) >= RESTART_HOLD_DURATION;
+        if held_long_enough && self.events >= 3 {
+            self.reset();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn expire(&mut self) {
+        if self
+            .last_event
+            .is_some_and(|last| last.elapsed() > RESTART_REPEAT_GAP)
+        {
+            self.reset();
+        }
+    }
+
+    fn reset(&mut self) {
+        self.started = None;
+        self.last_event = None;
+        self.events = 0;
     }
 }
 
@@ -148,6 +211,35 @@ mod tests {
             command_for_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
             None
         );
+        assert_eq!(
+            command_for_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            Some(Command::Undo)
+        );
+        assert_eq!(
+            command_for_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
+            Some(Command::Step(GameInput::Wait))
+        );
+    }
+
+    #[test]
+    fn up_arrow_requires_a_sustained_hold_to_restart() {
+        let start = Instant::now();
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+        let mut hold = RestartHold::default();
+
+        assert!(!hold.handle_key_at(up, start));
+        assert!(!hold.handle_key_at(up, start + Duration::from_millis(400)));
+        assert!(!hold.handle_key_at(up, start + Duration::from_millis(799)));
+        assert!(hold.handle_key_at(up, start + Duration::from_millis(800)));
+
+        // A pause breaks the gesture, and other keys cancel it.
+        assert!(!hold.handle_key_at(up, start + Duration::from_secs(2)));
+        assert!(!hold.handle_key_at(up, start + Duration::from_secs(3)));
+        assert!(!hold.handle_key_at(
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+            start + Duration::from_millis(3100)
+        ));
+        assert!(!hold.handle_key_at(up, start + Duration::from_millis(3200)));
     }
 
     #[test]
