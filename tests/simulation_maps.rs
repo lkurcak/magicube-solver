@@ -24,10 +24,7 @@ fn short_rows_are_empty_and_crlf_line_endings_are_accepted() {
     assert_eq!(game.level().width(), 5);
     assert_eq!(game.level().height(), 3);
     assert_eq!(game.level().tile_at(Position { x: 2, y: 1 }), Tile::Empty);
-    assert_eq!(
-        game.step(GameInput::MoveRight).to_ascii(),
-        "#####\n# @\n#####"
-    );
+    assert_eq!(game.step(GameInput::Right).to_ascii(), "#####\n# @\n#####");
 }
 
 #[test]
@@ -54,8 +51,8 @@ fn outside_the_map_is_empty_and_does_not_grant_a_jump() {
     let initial = GameState::from_ascii("@").unwrap();
     assert!(!initial.is_grounded());
     for (input, x) in [
-        (GameInput::MoveLeft, -1),
-        (GameInput::MoveRight, 1),
+        (GameInput::Left, -1),
+        (GameInput::Right, 1),
         (GameInput::Jump, 0),
     ] {
         let falling = initial.step(input);

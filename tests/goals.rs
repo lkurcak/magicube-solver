@@ -1,11 +1,11 @@
-use magicube_solver::GameInput::{Jump, MoveLeft, MoveRight, Shoot, Wait};
+use magicube_solver::GameInput::{Jump, Left, Right, Shoot, Wait};
 use magicube_solver::{GameState, GameStatus, Position, Tile};
 
 #[test]
 fn projectiles_pass_through_goals_on_either_substep() {
     for row in ["#@G    #", "#@ G   #"] {
         let initial = GameState::from_ascii(&format!("########\n{row}\n########")).unwrap();
-        let fired = initial.step(Shoot).step(MoveRight);
+        let fired = initial.step(Shoot).step(Right);
         assert_eq!(
             fired.projectile().unwrap().position,
             Position { x: 3, y: 1 }
@@ -20,12 +20,12 @@ fn spawning_the_player_cube_on_a_goal_wins_and_stops_play() {
     let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
     let goal = Position { x: 2, y: 1 };
     assert!(!initial.is_solid(goal));
-    let won = initial.step(Shoot).step(MoveRight);
+    let won = initial.step(Shoot).step(Right);
     assert_eq!(won.status(), GameStatus::Won);
     assert_eq!(won.cubes()[0].position, goal);
     assert_eq!(won.level().tile_at(goal), Tile::Goal);
     assert_eq!(won.to_ascii(), "#####\n#@O##\n#####");
-    for input in [Jump, MoveLeft, MoveRight, Shoot, Wait] {
+    for input in [Jump, Left, Right, Shoot, Wait] {
         assert_eq!(won.step(input), won);
     }
 }
@@ -34,13 +34,13 @@ fn spawning_the_player_cube_on_a_goal_wins_and_stops_play() {
 fn pushing_onto_a_goal_wins_only_with_the_player_cube() {
     for (symbol, status) in [('O', GameStatus::Won), ('C', GameStatus::Playing)] {
         let initial = GameState::from_ascii(&format!("######\n#@{symbol}G #\n######")).unwrap();
-        let pushed = initial.step(MoveRight);
+        let pushed = initial.step(Right);
         assert_eq!(pushed.cubes()[0].position, Position { x: 3, y: 1 });
         assert_eq!(pushed.status(), status);
     }
     let walking = GameState::from_ascii("######\n#@G  #\n######")
         .unwrap()
-        .step(MoveRight);
+        .step(Right);
     assert_eq!(walking.player().position, Position { x: 2, y: 1 });
     assert_eq!(walking.status(), GameStatus::Playing);
 }

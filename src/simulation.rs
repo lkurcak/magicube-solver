@@ -124,8 +124,8 @@ impl Level {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameInput {
-    MoveLeft,
-    MoveRight,
+    Left,
+    Right,
     Jump,
     /// Enter aiming mode, or cancel it without advancing time, unless recovering.
     Shoot,
@@ -292,8 +292,8 @@ impl GameState {
             return next;
         } else if next.player.mode == PlayerMode::Aiming {
             let direction = match input {
-                GameInput::MoveLeft => Direction::Left,
-                GameInput::MoveRight => Direction::Right,
+                GameInput::Left => Direction::Left,
+                GameInput::Right => Direction::Right,
                 _ => return next,
             };
             if !next.try_shoot(direction) {
@@ -302,10 +302,10 @@ impl GameState {
             next.player.mode = PlayerMode::Recovering;
         } else {
             match input {
-                GameInput::MoveLeft => {
+                GameInput::Left => {
                     next.try_walk(Direction::Left);
                 }
-                GameInput::MoveRight => {
+                GameInput::Right => {
                     next.try_walk(Direction::Right);
                 }
                 GameInput::Jump if next.is_grounded() && next.try_move(0, -1) => {

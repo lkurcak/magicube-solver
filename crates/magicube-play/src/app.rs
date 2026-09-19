@@ -23,8 +23,8 @@ pub fn command_for_key(key: KeyEvent) -> Option<Command> {
         return None;
     }
     match key.code {
-        KeyCode::Left | KeyCode::Char('a' | 'A') => Some(Command::Step(GameInput::MoveLeft)),
-        KeyCode::Right | KeyCode::Char('d' | 'D') => Some(Command::Step(GameInput::MoveRight)),
+        KeyCode::Left | KeyCode::Char('a' | 'A') => Some(Command::Step(GameInput::Left)),
+        KeyCode::Right | KeyCode::Char('d' | 'D') => Some(Command::Step(GameInput::Right)),
         KeyCode::Char('z' | 'Z') => Some(Command::Step(GameInput::Jump)),
         KeyCode::Down | KeyCode::Char('s' | 'S' | '.') => Some(Command::Step(GameInput::Wait)),
         KeyCode::Char('x' | 'X') => Some(Command::Step(GameInput::Shoot)),
@@ -121,10 +121,7 @@ mod tests {
     #[test]
     fn press_and_repeat_advance_but_release_and_unbound_shortcuts_do_not() {
         let key = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
-        assert_eq!(
-            command_for_key(key),
-            Some(Command::Step(GameInput::MoveRight))
-        );
+        assert_eq!(command_for_key(key), Some(Command::Step(GameInput::Right)));
         assert_eq!(
             command_for_key(KeyEvent {
                 kind: KeyEventKind::Repeat,
@@ -161,7 +158,7 @@ mod tests {
         assert_eq!(app.state, initial);
         app.apply(Command::Step(GameInput::Jump));
         let jumping = app.state.clone();
-        app.apply(Command::Step(GameInput::MoveRight));
+        app.apply(Command::Step(GameInput::Right));
         app.apply(Command::Step(GameInput::Wait));
         assert!(app.state.is_grounded());
         assert_eq!(app.steps(), 3);
@@ -170,8 +167,8 @@ mod tests {
         app.apply(Command::Undo);
         assert_eq!(app.state, jumping);
         assert_eq!(app.last_input(), Some(GameInput::Jump));
-        app.apply(Command::Step(GameInput::MoveLeft));
-        assert_eq!(app.state, jumping.step(GameInput::MoveLeft));
+        app.apply(Command::Step(GameInput::Left));
+        assert_eq!(app.state, jumping.step(GameInput::Left));
         app.apply(Command::Restart);
         assert_eq!(app.state, initial);
         assert_eq!(app.steps(), 0);
@@ -188,17 +185,17 @@ mod tests {
         assert_eq!(app.steps(), 0);
         app.apply(Command::Step(GameInput::Shoot));
         let aiming = app.state.clone();
-        app.apply(Command::Step(GameInput::MoveRight));
+        app.apply(Command::Step(GameInput::Right));
         assert!(app.is_recovering());
         app.advance_recovery();
         assert!(!app.is_recovering());
         app.advance_recovery();
         assert_eq!(
             app.inputs().collect::<Vec<_>>(),
-            [GameInput::Shoot, GameInput::MoveRight, GameInput::Wait]
+            [GameInput::Shoot, GameInput::Right, GameInput::Wait]
         );
         let recovered = app.state.clone();
-        app.apply(Command::Step(GameInput::MoveRight));
+        app.apply(Command::Step(GameInput::Right));
         app.apply(Command::Undo);
         assert_eq!(app.state, recovered);
         app.apply(Command::Undo);
@@ -208,7 +205,7 @@ mod tests {
         assert_eq!(app.state, aiming);
 
         // Blocked shots and cancellation do not schedule recovery.
-        app.apply(Command::Step(GameInput::MoveLeft));
+        app.apply(Command::Step(GameInput::Left));
         assert_eq!(app.state, aiming);
         assert!(!app.is_recovering());
         app.apply(Command::Step(GameInput::Shoot));
@@ -230,7 +227,7 @@ mod tests {
             let mut app = App::new(GameState::from_ascii(map).unwrap());
             app.apply(Command::Step(GameInput::Shoot));
             let aiming = app.state.clone();
-            app.apply(Command::Step(GameInput::MoveRight));
+            app.apply(Command::Step(GameInput::Right));
             assert_eq!(app.is_recovering(), needs_recovery);
             app.advance_recovery();
             assert_eq!(app.state.status(), status);
@@ -252,17 +249,13 @@ mod tests {
                 GameInput::Wait,
                 GameStatus::GameOver,
             ),
-            (
-                "######\n#@OG #\n######",
-                GameInput::MoveRight,
-                GameStatus::Won,
-            ),
+            ("######\n#@OG #\n######", GameInput::Right, GameStatus::Won),
         ] {
             let initial = GameState::from_ascii(map).unwrap();
             let mut app = App::new(initial.clone());
             app.apply(Command::Step(input));
             assert_eq!(app.state.status(), status);
-            app.apply(Command::Step(GameInput::MoveLeft));
+            app.apply(Command::Step(GameInput::Left));
             app.apply(Command::Step(GameInput::Shoot));
             assert_eq!(app.steps(), 1);
             app.apply(Command::Undo);

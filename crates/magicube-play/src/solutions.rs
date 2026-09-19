@@ -85,8 +85,8 @@ pub fn save(
 
 fn input_name(input: GameInput) -> &'static str {
     match input {
-        GameInput::MoveLeft => "move_left",
-        GameInput::MoveRight => "move_right",
+        GameInput::Left => "left",
+        GameInput::Right => "right",
         GameInput::Jump => "jump",
         GameInput::Shoot => "shoot",
         GameInput::Wait => "wait",
@@ -131,7 +131,7 @@ mod tests {
         ));
         let map = "#######\n#     #\n#@ G###\n#######\n";
         let mut app = App::new(GameState::from_ascii(map).unwrap());
-        for input in [GameInput::Jump, GameInput::MoveRight, GameInput::Wait] {
+        for input in [GameInput::Jump, GameInput::Right, GameInput::Wait] {
             app.apply(Command::Step(input));
         }
         for _ in 0..3 {
@@ -141,7 +141,7 @@ mod tests {
             GameInput::Shoot,
             GameInput::Shoot,
             GameInput::Shoot,
-            GameInput::MoveRight,
+            GameInput::Right,
         ] {
             app.apply(Command::Step(input));
         }
@@ -156,13 +156,13 @@ mod tests {
         assert_eq!(saved["level"]["map"], map);
         assert_eq!(
             saved["inputs"],
-            serde_json::json!(["shoot", "shoot", "shoot", "move_right", "wait"])
+            serde_json::json!(["shoot", "shoot", "shoot", "right", "wait"])
         );
         let mut replay = GameState::from_ascii(saved["level"]["map"].as_str().unwrap()).unwrap();
         for input in saved["inputs"].as_array().unwrap() {
             let input = match input.as_str().unwrap() {
-                "move_left" => GameInput::MoveLeft,
-                "move_right" => GameInput::MoveRight,
+                "left" => GameInput::Left,
+                "right" => GameInput::Right,
                 "jump" => GameInput::Jump,
                 "shoot" => GameInput::Shoot,
                 "wait" => GameInput::Wait,

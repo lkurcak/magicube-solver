@@ -205,8 +205,8 @@ fn line(out: &mut impl Write, row: u16, width: u16, text: &str, color: Color) ->
 fn input_name(input: Option<GameInput>) -> &'static str {
     match input {
         None => "-",
-        Some(GameInput::MoveLeft) => "left",
-        Some(GameInput::MoveRight) => "right",
+        Some(GameInput::Left) => "left",
+        Some(GameInput::Right) => "right",
         Some(GameInput::Jump) => "jump",
         Some(GameInput::Wait) => "wait",
         Some(GameInput::Shoot) => "shoot",

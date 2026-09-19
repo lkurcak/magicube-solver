@@ -88,7 +88,7 @@ Saving does not advance time or add an undo entry.
 
 Records include a format version, game version, level name, the complete starting
 ASCII map, outcome (`in_progress`, `won`, or `game_over`), and an ordered `inputs`
-array. Input names are `move_left`, `move_right`, `jump`, `shoot`, and `wait`;
+array. Input names are `left`, `right`, `jump`, `shoot`, and `wait`;
 aiming/cancelling are retained as `shoot` inputs. Automatic recovery updates are
 recorded explicitly as `wait`. Undone inputs are excluded and
 restart clears the sequence. A partial attempt can also be saved while aiming.
@@ -112,7 +112,7 @@ use magicube_solver::{GameInput, GameState};
 let initial = GameState::from_ascii("#######\n#     #\n# @   #\n#######").unwrap();
 let next = initial
     .step(GameInput::Jump)
-    .step(GameInput::MoveRight)
+    .step(GameInput::Right)
     .step(GameInput::Wait);
 println!("{}", next.to_ascii());
 ```

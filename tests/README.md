@@ -8,6 +8,7 @@ jump and gravity checks. `simulation_maps.rs` covers parsing imported maps and
 open map edges. `shooting.rs` covers aiming, shot recovery, projectile collisions, cube ownership,
 falling, and crushing. `pushing.rs` covers cube chains, blocked pushes, and pushing
 off ledges. `goals.rs` covers passable goals and winning with the player's cube.
+`solutions.rs` replays saved solutions for the first three levels.
 `level_drawing.rs` checks the ASCII fixture helper.
 
 `support::level` removes shared test indentation. Production parsing preserves
@@ -29,7 +30,7 @@ fn player_moves_right() {
         "#,
     )).unwrap();
 
-    let next = initial.step(GameInput::MoveRight);
+    let next = initial.step(GameInput::Right);
 
     assert_level_eq(
         &next.to_ascii(),
