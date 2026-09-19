@@ -1,7 +1,13 @@
 // Manual crops are authoritative. Optional `anchor` detects each screenshot's grid phase.
 anchor # ../tiles-manual/wall.png
+# ../tiles-manual/wall2.png
+# ../tiles-manual/wall3.png
+# ../tiles-manual/wall4.png
 # ../tiles-manual/pedestal.png
 @ ../tiles-manual/player.png
 G ../tiles-manual/goal.png
 S ../tiles-manual/skull.png
 t ../tiles-manual/torch.png
+# ../tiles-manual/torch2.png
+C ../tiles-manual/cube.png
+C ../tiles-manual/cube2.png
