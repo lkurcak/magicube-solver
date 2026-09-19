@@ -21,7 +21,7 @@ Run the solver prototype:
 cargo run --bin magicube-solver
 ```
 
-Play the bundled first level interactively:
+Open the interactive level selector for the bundled levels:
 
 ```sh
 cargo run -p magicube-play
@@ -53,6 +53,10 @@ key uses the terminal's normal key repeat. Resizing redraws without advancing ti
 | R | Restart the level |
 | P | Save the current input sequence, including partial attempts |
 | Q / Esc / Ctrl-C | Quit |
+
+The startup selector uses Ratatui's stateful list widget. Choose a bundled level
+with Up/Down or J/K, preview it alongside the list, and press Enter to play.
+Passing a level file on the command line skips the selector.
 
 The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.

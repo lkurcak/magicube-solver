@@ -1,5 +1,6 @@
 mod app;
 mod cli;
+mod level_select;
 mod render;
 mod solutions;
 mod terminal;
@@ -18,12 +19,35 @@ use app::{App, Command, Notification};
 use cli::Options;
 use terminal::TerminalSession;
 
-const DEFAULT_LEVEL: &str = include_str!("../../../data/level-manual-labels/1.txt");
+#[derive(Debug, Clone, Copy)]
+struct BundledLevel {
+    name: &'static str,
+    map: &'static str,
+}
+
+const BUNDLED_LEVELS: &[BundledLevel] = &[
+    BundledLevel {
+        name: "Level 1",
+        map: include_str!("../../../data/level-manual-labels/1.txt"),
+    },
+    BundledLevel {
+        name: "Level 2",
+        map: include_str!("../../../data/level-manual-labels/2.txt"),
+    },
+    BundledLevel {
+        name: "Level 3",
+        map: include_str!("../../../data/level-manual-labels/3.txt"),
+    },
+    BundledLevel {
+        name: "Level 4",
+        map: include_str!("../../../data/level-manual-labels/4.txt"),
+    },
+];
 const SHOT_RECOVERY_DELAY: Duration = Duration::from_millis(120);
 const HELP: &str = "Usage: magicube-play [--solutions-dir PATH] [LEVEL.txt]
 
 Play an ASCII level using the shared Magicube simulator.
-Without a path, loads the bundled first level.
+Without a path, opens an interactive selector for the bundled levels.
 Movement, firing and waiting advance one update. Aiming pauses time.
 Successful shots automatically advance one recovery update after a brief pause.
 
@@ -60,25 +84,34 @@ fn run() -> Result<(), Box<dyn Error>> {
         print!("{HELP}");
         return Ok(());
     }
-    // Load and validate before taking over the terminal so errors print normally.
-    let (map, name) = match options.level.as_ref() {
+    // Explicit files still skip the selector and launch directly.
+    let custom_level = match options.level.as_ref() {
         Some(path) => {
             let map = fs::read_to_string(path).map_err(|error| {
                 io::Error::new(error.kind(), format!("{}: {error}", path.display()))
             })?;
-            (map, path.display().to_string())
+            Some((map, path.display().to_string()))
         }
-        None => (DEFAULT_LEVEL.to_owned(), "Level 1 (bundled)".to_owned()),
+        None => None,
     };
-    let state = GameState::from_ascii(&map)?;
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(
             io::Error::other("interactive mode requires a terminal on stdin and stdout").into(),
         );
     }
 
-    let mut app = App::new(state);
     let mut terminal = TerminalSession::enter()?;
+    let (map, name) = match custom_level {
+        Some(level) => level,
+        None => {
+            let Some(index) = level_select::choose(&mut terminal.stdout, BUNDLED_LEVELS)? else {
+                return Ok(());
+            };
+            let level = BUNDLED_LEVELS[index];
+            (level.map.to_owned(), format!("{} (bundled)", level.name))
+        }
+    };
+    let mut app = App::new(GameState::from_ascii(&map)?);
     let mut last_saved_path = None;
     let mut previous_status = app.state.status();
     let mut save_requested = false;
