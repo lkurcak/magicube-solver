@@ -58,7 +58,7 @@ Both are off by default: aiming, shooting and pushing require ground support.
 --airborne-shooting and --airborne-pushing enable them during jumps and falls
 for manual play. Solver launches always use the default grounded-only rules.
 Movement, firing and waiting advance one update. Aiming pauses time.
-Successful shots automatically advance two recovery updates after brief pauses.
+Successful shots automatically advance one recovery update after a brief pause.
 
   Left / A          Move or push left
   Right / D         Move or push right

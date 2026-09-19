@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_is_fully_recorded_and_undo_groups_it_with_the_shot() {
+    fn recovery_is_recorded_once_and_undo_groups_it_with_the_shot() {
         let initial = GameState::from_ascii("##########\n#@       #\n##########").unwrap();
         let mut app = App::new(initial.clone());
         app.advance_recovery();
@@ -280,18 +280,11 @@ mod tests {
         app.apply(Command::Step(GameInput::Right));
         assert!(app.is_recovering());
         app.advance_recovery();
-        assert!(app.is_recovering());
-        app.advance_recovery();
         assert!(!app.is_recovering());
         app.advance_recovery();
         assert_eq!(
             app.inputs().collect::<Vec<_>>(),
-            [
-                GameInput::Shoot,
-                GameInput::Right,
-                GameInput::Wait,
-                GameInput::Wait,
-            ]
+            [GameInput::Shoot, GameInput::Right, GameInput::Wait]
         );
         let recovered = app.state.clone();
         app.apply(Command::Step(GameInput::Right));
@@ -314,26 +307,24 @@ mod tests {
 
     #[test]
     fn wins_and_deaths_stop_recovery_and_allow_undoing_the_shot() {
-        for (map, status, expected_steps) in [
-            ("#####\n#@G##\n#####", GameStatus::Won, 3),
-            ("########\n#@  G###\n########", GameStatus::Won, 4),
+        for (map, status, needs_recovery) in [
+            ("#####\n#@G##\n#####", GameStatus::Won, false),
+            ("########\n#@  G###\n########", GameStatus::Won, true),
             (
                 "#######\n# C   #\n#     #\n#     #\n# @   #\n#######",
                 GameStatus::GameOver,
-                3,
+                true,
             ),
         ] {
             let mut app = App::new(GameState::from_ascii(map).unwrap());
             app.apply(Command::Step(GameInput::Shoot));
             let aiming = app.state.clone();
             app.apply(Command::Step(GameInput::Right));
-            assert!(app.is_recovering());
-            while app.is_recovering() {
-                app.advance_recovery();
-            }
+            assert_eq!(app.is_recovering(), needs_recovery);
+            app.advance_recovery();
             assert_eq!(app.state.status(), status);
             let steps = app.steps();
-            assert_eq!(steps, expected_steps);
+            assert_eq!(steps, if needs_recovery { 3 } else { 2 });
             app.advance_recovery();
             assert_eq!(app.steps(), steps);
             app.apply(Command::Undo);

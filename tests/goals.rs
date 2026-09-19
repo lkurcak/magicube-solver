@@ -5,7 +5,7 @@ use magicube_solver::{GameState, GameStatus, Position, Tile};
 fn projectiles_pass_through_goals_on_every_substep() {
     for row in ["#@G    #", "#@ G   #", "#@  G  #"] {
         let initial = GameState::from_ascii(&format!("########\n{row}\n########")).unwrap();
-        let fired = initial.step(Shoot).step(Right).step(Wait);
+        let fired = initial.step(Shoot).step(Right);
         assert_eq!(
             fired.projectile().unwrap().position,
             Position { x: 4, y: 1 }
@@ -20,7 +20,7 @@ fn spawning_the_player_cube_on_a_goal_wins_and_stops_play() {
     let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
     let goal = Position { x: 2, y: 1 };
     assert!(!initial.is_solid(goal));
-    let won = initial.step(Shoot).step(Right).step(Wait);
+    let won = initial.step(Shoot).step(Right);
     assert_eq!(won.status(), GameStatus::Won);
     assert_eq!(won.cubes()[0].position, goal);
     assert_eq!(won.level().tile_at(goal), Tile::Goal);

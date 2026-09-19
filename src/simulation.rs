@@ -40,7 +40,7 @@ impl Direction {
 pub enum PlayerMode {
     Normal,
     Aiming,
-    /// Recovery updates advance physics but ignore the player's action.
+    /// The next update advances physics but ignores the player's action.
     Recovering,
 }
 
@@ -80,12 +80,6 @@ pub struct GameSettings {
     pub allow_airborne_pushing: bool,
     /// Maximum number of tiles a projectile traverses during one update.
     pub projectile_tiles_per_update: usize,
-    /// Number of physics updates forced after a successful shot.
-    /// Zero returns control immediately after the firing update.
-    pub shot_recovery_updates: usize,
-    /// Whether a newly fired projectile moves during the firing update.
-    /// New games defer movement so gravity can react to the removed player cube.
-    pub projectile_moves_on_firing_update: bool,
 }
 
 impl Default for GameSettings {
@@ -94,8 +88,6 @@ impl Default for GameSettings {
             allow_airborne_shooting: false,
             allow_airborne_pushing: false,
             projectile_tiles_per_update: 3,
-            shot_recovery_updates: 2,
-            projectile_moves_on_firing_update: false,
         }
     }
 }
@@ -175,9 +167,6 @@ pub struct PlayerState {
     /// Updates remaining before gravity resumes (0, 1, or 2).
     pub air_inputs_remaining: u8,
     pub mode: PlayerMode,
-    /// Forced physics updates remaining after a shot. Nonzero exactly while
-    /// `mode` is [`PlayerMode::Recovering`] during normal play.
-    pub recovery_updates_remaining: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -272,7 +261,6 @@ impl GameState {
                 position: player_position.ok_or(ParseLevelError::MissingPlayer)?,
                 air_inputs_remaining: 0,
                 mode: PlayerMode::Normal,
-                recovery_updates_remaining: 0,
             },
             cubes,
             projectile: None,
@@ -343,17 +331,16 @@ impl GameState {
     /// A blocked shot keeps aiming and preserves the previous cube/projectile.
     /// Without airborne shooting enabled, Shoot is ignored while unsupported
     /// and in Normal mode, without advancing time. Cancelling aim always works.
-    /// A successful shot may enter Recovering: the configured number of following
-    /// inputs only advance physics and consume airtime. Use Wait for these forced
-    /// updates when playing or searching for solutions. Newly fired projectiles
-    /// normally wait until the first following update before moving.
+    /// A successful shot enters Recovering: the following input only advances
+    /// physics and consumes airtime, then restores Normal mode. Use Wait for
+    /// this forced update when playing or searching for solutions.
     /// Walking pushes any contiguous horizontal chain of cubes one tile if the
     /// space beyond it is not solid and the player is grounded (unless airborne
     /// pushing is enabled). A blocked push leaves the whole chain in place but
     /// still advances time, including airtime and gravity.
     ///
-    /// An update resolves the action, moves an eligible projectile by up to the
-    /// configured number of tiles, then
+    /// An update resolves the action, moves the projectile by up to the configured
+    /// number of tiles, then
     /// applies up to two gravity substeps to player and cubes. Within each gravity
     /// substep, lower bodies move first so stacks and falling supports stay intact.
     /// A jump rises one tile and suspends player gravity for two more air inputs;
@@ -366,13 +353,8 @@ impl GameState {
             return next;
         }
         let mut jumped = false;
-        let mut fired_projectile = false;
         if next.player.mode == PlayerMode::Recovering {
-            next.player.recovery_updates_remaining =
-                next.player.recovery_updates_remaining.saturating_sub(1);
-            if next.player.recovery_updates_remaining == 0 {
-                next.player.mode = PlayerMode::Normal;
-            }
+            next.player.mode = PlayerMode::Normal;
         } else if input == GameInput::Shoot {
             next.player.mode = if next.player.mode == PlayerMode::Aiming {
                 PlayerMode::Normal
@@ -391,13 +373,7 @@ impl GameState {
             if !next.try_shoot(direction) {
                 return next;
             }
-            fired_projectile = true;
-            next.player.recovery_updates_remaining = next.settings.shot_recovery_updates;
-            next.player.mode = if next.player.recovery_updates_remaining == 0 {
-                PlayerMode::Normal
-            } else {
-                PlayerMode::Recovering
-            };
+            next.player.mode = PlayerMode::Recovering;
         } else {
             match input {
                 GameInput::Left => {
@@ -414,9 +390,8 @@ impl GameState {
             }
         }
 
-        if !fired_projectile || next.settings.projectile_moves_on_firing_update {
-            next.advance_projectile();
-        }
+        let swept_cube_positions = next.gravity_swept_cube_positions();
+        next.advance_projectile(&swept_cube_positions);
         if !jumped {
             if next.is_grounded() {
                 next.player.air_inputs_remaining = 0;
@@ -464,13 +439,13 @@ impl GameState {
         true
     }
 
-    fn advance_projectile(&mut self) {
+    fn advance_projectile(&mut self, swept_cube_positions: &[Position]) {
         let Some(mut projectile) = self.projectile.take() else {
             return;
         };
         for _ in 0..self.settings.projectile_tiles_per_update {
             let target = projectile.position.offset(projectile.direction.dx(), 0);
-            if self.blocks_projectile(target) {
+            if self.blocks_projectile(target) || swept_cube_positions.contains(&target) {
                 self.cubes.push(Cube {
                     position: projectile.position,
                     source: CubeSource::Player,
@@ -485,7 +460,29 @@ impl GameState {
         self.projectile = Some(projectile);
     }
 
+    /// Tiles occupied by cubes at any point during this update's gravity pass.
+    /// This preview does not mutate the real state. It lets projectile collision
+    /// treat a falling cube as occupying its complete vertical sweep while all
+    /// other physics continues to use the cube's canonical position.
+    fn gravity_swept_cube_positions(&self) -> Vec<Position> {
+        if self.projectile.is_none() || self.cubes.is_empty() {
+            return Vec::new();
+        }
+        let mut preview = self.clone();
+        let mut swept: Vec<_> = preview.cubes.iter().map(|cube| cube.position).collect();
+        preview.apply_gravity_recording(false, Some(&mut swept));
+        swept
+    }
+
     fn apply_gravity(&mut self, player_falls: bool) {
+        self.apply_gravity_recording(player_falls, None);
+    }
+
+    fn apply_gravity_recording(
+        &mut self,
+        player_falls: bool,
+        mut swept_cube_positions: Option<&mut Vec<Position>>,
+    ) {
         for _ in 0..2 {
             // None identifies the player; Some(index) identifies a cube.
             let mut bodies: Vec<_> = self
@@ -508,6 +505,9 @@ impl GameState {
                         let target = self.cubes[index].position.offset(0, 1);
                         if !self.is_solid(target) {
                             self.cubes[index].position = target;
+                            if let Some(swept) = swept_cube_positions.as_deref_mut() {
+                                swept.push(target);
+                            }
                             if target == self.player.position {
                                 self.status = GameStatus::GameOver;
                             }

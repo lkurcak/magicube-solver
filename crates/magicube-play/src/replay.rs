@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn autoplay_pauses_seeks_resumes_and_stops_at_the_end_without_skipping() {
         let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
-        let mut replay = Replay::new(initial, vec![Shoot, Right, Wait]);
+        let mut replay = Replay::new(initial, vec![Shoot, Right]);
         let now = Instant::now();
         replay.apply(Command::TogglePlayback, now);
         assert!(!replay.tick(now + PLAYBACK_INTERVAL / 2));
@@ -273,10 +273,8 @@ mod tests {
         // Even a long delay advances just one recorded input.
         assert!(replay.tick(now + Duration::from_secs(20)));
         assert_eq!(replay.position(), 2);
-        assert!(replay.is_playing());
-        assert!(replay.tick(now + Duration::from_secs(21)));
         assert!(!replay.is_playing());
-        assert_eq!(replay.state().status(), GameStatus::Won);
+        assert!(!replay.tick(now + Duration::from_secs(21)));
         replay.apply(Command::TogglePlayback, now + Duration::from_secs(21));
         assert_eq!(replay.position(), 0);
         assert!(replay.is_playing());
@@ -286,8 +284,6 @@ mod tests {
         replay.apply(Command::TogglePlayback, now + Duration::from_secs(22));
         assert!(!replay.tick(now + Duration::from_secs(22)));
         assert!(replay.tick(now + Duration::from_secs(23)));
-        assert_eq!(replay.state().status(), GameStatus::Playing);
-        assert!(replay.tick(now + Duration::from_secs(24)));
         assert_eq!(replay.state().status(), GameStatus::Won);
     }
 
@@ -346,7 +342,7 @@ mod tests {
         let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
         let mut replay = Replay::from_solver(initial.clone(), SolveOptions::default()).unwrap();
         assert_eq!(replay.state(), &initial);
-        assert_eq!(replay.len(), 3);
+        assert_eq!(replay.len(), 2);
         replay.apply(Command::End, Instant::now());
         assert_eq!(replay.state().status(), GameStatus::Won);
         replay.apply(Command::Start, Instant::now());
