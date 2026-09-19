@@ -4,9 +4,10 @@ use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
-use magicube_solver::{GameInput, GameStatus, PlayerMode, Position, Tile};
+use magicube_solver::{GameInput, GameSettings, GameState, GameStatus, PlayerMode, Position, Tile};
 
 use crate::app::App;
+use crate::replay::Replay;
 
 const HEADER_ROWS: u16 = 6;
 
@@ -16,45 +17,20 @@ pub fn draw(
     app: &App,
     name: &str,
 ) -> io::Result<()> {
-    queue!(out, ResetColor, MoveTo(0, 0), Clear(ClearType::All))?;
-    if width == 0 || height <= HEADER_ROWS {
-        if width > 0 && height > 0 {
-            line(
-                out,
-                0,
-                width,
-                "Resize terminal to see the board (Q quits)",
-                Color::Yellow,
-            )?;
-        }
-        return out.flush();
+    if !begin_frame(out, (width, height))? {
+        return Ok(());
     }
 
     let player = app.state.player();
-    let level = app.state.level();
-    let outside = player.position.x < 0
-        || player.position.y < 0
-        || player.position.x >= level.width() as isize
-        || player.position.y >= level.height() as isize;
-    let motion = if app.state.status() == GameStatus::Won {
-        "Won"
-    } else if app.state.status() == GameStatus::GameOver {
-        "Game over"
-    } else if player.mode == PlayerMode::Aiming {
-        "Aiming"
-    } else if player.mode == PlayerMode::Recovering {
-        "Recovering"
-    } else if outside {
-        "Outside map"
-    } else if app.state.is_grounded() {
-        "Grounded"
-    } else if player.air_inputs_remaining > 0 {
-        "Jumping"
-    } else {
-        "Falling"
-    };
+    let motion = motion(&app.state);
 
-    line(out, 0, width, "MAGICUBE", Color::Cyan)?;
+    line(
+        out,
+        0,
+        width,
+        &format!("MAGICUBE | {}", rules_label(app.state.settings())),
+        Color::Cyan,
+    )?;
     line(out, 1, width, &format!("Level: {name}"), Color::White)?;
     line(
         out,
@@ -110,7 +86,7 @@ pub fn draw(
         )?;
     } else if player.mode == PlayerMode::Recovering {
         line(out, 5, width, "Recovering from shot...", Color::Yellow)?;
-    } else if outside {
+    } else if outside(&app.state) {
         line(
             out,
             5,
@@ -142,6 +118,145 @@ pub fn draw(
             board_start += 1;
         }
     }
+    draw_board(out, (width, height), &app.state, board_start)
+}
+
+pub fn draw_replay(
+    out: &mut impl Write,
+    (width, height): (u16, u16),
+    replay: &Replay,
+    name: &str,
+) -> io::Result<()> {
+    if !begin_frame(out, (width, height))? {
+        return Ok(());
+    }
+    let state = replay.state();
+    let player = state.player();
+    let playback = if replay.is_playing() {
+        "Playing"
+    } else {
+        "Paused"
+    };
+    line(
+        out,
+        0,
+        width,
+        &format!(
+            "MAGICUBE REPLAY | {playback} | 4 inputs/sec | {}",
+            rules_label(state.settings())
+        ),
+        Color::Cyan,
+    )?;
+    line(out, 1, width, &format!("Level: {name}"), Color::White)?;
+    line(
+        out,
+        2,
+        width,
+        &format!(
+            "Step {}/{} | {} | ({}, {}) | Air: {}",
+            replay.position(),
+            replay.len(),
+            motion(state),
+            player.position.x,
+            player.position.y,
+            player.air_inputs_remaining,
+        ),
+        Color::White,
+    )?;
+    line(
+        out,
+        3,
+        width,
+        &format!(
+            "Last: {} | Next: {}",
+            input_name(replay.last_input()),
+            input_name(replay.next_input())
+        ),
+        Color::White,
+    )?;
+    line(
+        out,
+        4,
+        width,
+        "Left/Right or A/D: -/+1 | Up/Down or PgUp/PgDn: -/+10",
+        Color::Grey,
+    )?;
+    line(
+        out,
+        5,
+        width,
+        "Home/End: start/end | Space: play/pause | Q/Esc: close replay",
+        Color::Grey,
+    )?;
+    draw_board(out, (width, height), state, HEADER_ROWS)
+}
+
+pub fn rules_label(settings: GameSettings) -> &'static str {
+    match (
+        settings.allow_airborne_shooting,
+        settings.allow_airborne_pushing,
+    ) {
+        (false, false) => "Shots: grounded | Pushes: grounded",
+        (true, false) => "Shots: airborne | Pushes: grounded",
+        (false, true) => "Shots: grounded | Pushes: airborne",
+        (true, true) => "Shots: airborne | Pushes: airborne",
+    }
+}
+
+fn begin_frame(out: &mut impl Write, (width, height): (u16, u16)) -> io::Result<bool> {
+    queue!(out, ResetColor, MoveTo(0, 0), Clear(ClearType::All))?;
+    if width == 0 || height <= HEADER_ROWS {
+        if width > 0 && height > 0 {
+            line(
+                out,
+                0,
+                width,
+                "Resize terminal to see the board (Q quits)",
+                Color::Yellow,
+            )?;
+        }
+        out.flush()?;
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn outside(state: &GameState) -> bool {
+    let position = state.player().position;
+    position.x < 0
+        || position.y < 0
+        || position.x >= state.level().width() as isize
+        || position.y >= state.level().height() as isize
+}
+
+fn motion(state: &GameState) -> &'static str {
+    if state.status() == GameStatus::Won {
+        "Won"
+    } else if state.status() == GameStatus::GameOver {
+        "Game over"
+    } else if state.player().mode == PlayerMode::Aiming {
+        "Aiming"
+    } else if state.player().mode == PlayerMode::Recovering {
+        "Recovering"
+    } else if outside(state) {
+        "Outside map"
+    } else if state.is_grounded() {
+        "Grounded"
+    } else if state.player().air_inputs_remaining > 0 {
+        "Jumping"
+    } else {
+        "Falling"
+    }
+}
+
+fn draw_board(
+    out: &mut impl Write,
+    (width, height): (u16, u16),
+    state: &GameState,
+    board_start: u16,
+) -> io::Result<()> {
+    let player = state.player();
+    let level = state.level();
     let columns = width;
     let rows = height - board_start;
     let origin = Position {
@@ -155,12 +270,12 @@ pub fn draw(
                 x: origin.x + x as isize,
                 y: origin.y + y as isize,
             };
-            let glyph = app.state.symbol_at(position);
+            let glyph = state.symbol_at(position);
             let color = match glyph {
-                '@' if app.state.status() == GameStatus::GameOver => Color::Red,
+                '@' if state.status() == GameStatus::GameOver => Color::Red,
                 '@' => Color::Cyan,
                 '#' => Color::Grey,
-                'D' if app.state.pressure_plates_active() => Color::White,
+                'D' if state.pressure_plates_active() => Color::White,
                 'D' => Color::DarkGrey,
                 'P' => Color::Yellow,
                 'C' => Color::Blue,
@@ -242,6 +357,38 @@ mod tests {
             let mut buffer = Vec::new();
             draw(&mut buffer, size, &app, "test").unwrap();
             assert_eq!(app.state, initial);
+        }
+    }
+
+    #[test]
+    fn replay_renders_cursor_inputs_and_controls_without_advancing() {
+        let initial = GameState::from_ascii("#######\n#     #\n#@ G###\n#######").unwrap();
+        let mut replay = Replay::new(
+            initial,
+            vec![GameInput::Shoot, GameInput::Right, GameInput::Wait],
+        );
+        replay.apply(
+            crate::replay::Command::Forward(2),
+            std::time::Instant::now(),
+        );
+        let before = replay.state().clone();
+        for size in [(0, 0), (1, 1), (10, 6), (2, 7), (80, 24)] {
+            let mut buffer = Vec::new();
+            draw_replay(&mut buffer, size, &replay, "test").unwrap();
+            assert_eq!(replay.state(), &before);
+            assert_eq!(replay.position(), 2);
+            if size == (80, 24) {
+                let output = String::from_utf8(buffer).unwrap();
+                for text in [
+                    "REPLAY | Paused",
+                    "Step 2/3 | Recovering",
+                    "Last: right | Next: wait",
+                    "Space: play/pause",
+                ] {
+                    assert!(output.contains(text), "missing {text}");
+                }
+                assert!(!output.contains("U: undo"));
+            }
         }
     }
 }

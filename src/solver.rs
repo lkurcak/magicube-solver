@@ -54,6 +54,9 @@ pub struct SolveResult {
 }
 
 /// Finds a shortest winning sequence without changing `initial`.
+/// Uses the settings carried by `initial`. [`GameState::from_ascii`] supplies
+/// the standard grounded-only rules; non-default settings require an explicit
+/// [`GameState::from_ascii_with_settings`] call.
 ///
 /// Each input costs one, including entering/cancelling aim and the forced
 /// recovery update (represented by `Wait`). Ties use the deterministic order
@@ -173,6 +176,7 @@ struct SearchState(GameState);
 impl PartialEq for SearchState {
     fn eq(&self, other: &Self) -> bool {
         self.0.player() == other.0.player()
+            && self.0.settings() == other.0.settings()
             && self.0.cubes() == other.0.cubes()
             && self.0.projectile() == other.0.projectile()
             && self.0.status() == other.0.status()
@@ -184,6 +188,7 @@ impl Eq for SearchState {}
 impl Hash for SearchState {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.player().hash(state);
+        self.0.settings().hash(state);
         self.0.cubes().hash(state);
         self.0.projectile().hash(state);
         self.0.status().hash(state);

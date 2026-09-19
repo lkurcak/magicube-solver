@@ -2,6 +2,7 @@ mod app;
 mod cli;
 mod level_select;
 mod render;
+mod replay;
 mod solutions;
 mod terminal;
 
@@ -54,12 +55,24 @@ const BUNDLED_LEVELS: &[BundledLevel] = &[
         name: "Level 7",
         map: include_str!("../../../data/level-manual-labels/7.txt"),
     },
+    BundledLevel {
+        name: "Level 8",
+        map: include_str!("../../../data/level-manual-labels/8.txt"),
+    },
 ];
 const SHOT_RECOVERY_DELAY: Duration = Duration::from_millis(120);
-const HELP: &str = "Usage: magicube-play [--solutions-dir PATH] [LEVEL.txt]
+const HELP: &str = "Usage: magicube-play [--solutions-dir PATH] [--airborne-shooting] [--airborne-pushing] [LEVEL.txt]
+       magicube-play --replay SOLUTION.json
+       magicube-play --solve [LEVEL.txt]
 
 Play an ASCII level using the shared Magicube simulator.
 Without a path, opens an interactive selector for the bundled levels.
+In the selector: Enter plays, S opens a solver replay, and R browses saved replays
+for the highlighted level. Closing a replay returns to its menu.
+F toggles airborne shooting and P toggles airborne pushing in the selector.
+Both are off by default: aiming, shooting and pushing require ground support.
+--airborne-shooting and --airborne-pushing enable them during jumps and falls
+for manual play. Solver launches always use the default grounded-only rules.
 Movement, firing and waiting advance one update. Aiming pauses time.
 Successful shots automatically advance one recovery update after a brief pause.
 
@@ -79,6 +92,25 @@ Winning automatically saves your solution. P also saves partial attempts.
 Saves use your platform's user data directory under magicube/solutions.
 Use --solutions-dir PATH to choose another directory. No directory is created
 until a save. The saved filename is shown in-game and printed when you quit.
+The selector's saved-replay browser uses this same directory.
+
+Replay a saved attempt with --replay (uses its embedded map), or find and replay
+a shortest solution with --solve. With no level file, --solve opens the selector.
+The solver searches up to one million states and reports if that limit is reached.
+Replay starts paused at step 0. Each step is one recorded input, including
+aiming and recovery waits. Partial attempts and game-over saves also work.
+
+  Left/Right / A/D   Back/forward one input
+  Up/Down / PgUp/PgDn
+                    Back/forward ten inputs
+  Home / End        Jump to start/end
+  Space             Play/pause at four inputs per second
+  Q / Esc / Ctrl-C  Quit
+
+Seeking pauses playback. Playback stops at the end; Space there starts again.
+Replay never saves or modifies the input sequence.
+New saves record both shooting and pushing settings. Older saves retain their
+original rules: version 1 allows both in midair; version 2 allows airborne pushing.
 ";
 
 fn main() -> ExitCode {
@@ -97,6 +129,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         print!("{HELP}");
         return Ok(());
     }
+    let mut play_settings = options.settings;
+    // Validate saved data before entering raw mode, including its final outcome.
+    let saved_replay = options.replay.as_deref().map(solutions::load).transpose()?;
     // Explicit files still skip the selector and launch directly.
     let custom_level = match options.level.as_ref() {
         Some(path) => {
@@ -114,17 +149,36 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let mut terminal = TerminalSession::enter()?;
+    if let Some((name, replay)) = saved_replay {
+        replay::run(
+            &mut terminal.stdout,
+            &format!("{name} (saved replay)"),
+            replay,
+        )?;
+        return Ok(());
+    }
     let (map, name) = match custom_level {
         Some(level) => level,
         None => {
-            let Some(index) = level_select::choose(&mut terminal.stdout, BUNDLED_LEVELS)? else {
+            let Some(index) = level_select::choose(
+                &mut terminal.stdout,
+                BUNDLED_LEVELS,
+                options.solve,
+                options.solutions_dir.as_deref(),
+                &mut play_settings,
+            )?
+            else {
                 return Ok(());
             };
             let level = BUNDLED_LEVELS[index];
             (level.map.to_owned(), format!("{} (bundled)", level.name))
         }
     };
-    let mut app = App::new(GameState::from_ascii(&map)?);
+    if options.solve {
+        replay::solve_and_run(&mut terminal.stdout, &name, &map)?;
+        return Ok(());
+    }
+    let mut app = App::new(GameState::from_ascii_with_settings(&map, play_settings)?);
     let mut last_saved_path = None;
     let mut previous_status = app.state.status();
     let mut save_requested = false;

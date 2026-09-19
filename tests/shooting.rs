@@ -1,5 +1,7 @@
 use magicube_solver::GameInput::{Jump, Left, Right, Shoot, Wait};
-use magicube_solver::{CubeSource, GameState, GameStatus, ParseLevelError, PlayerMode, Position};
+use magicube_solver::{
+    CubeSource, GameSettings, GameState, GameStatus, ParseLevelError, PlayerMode, Position,
+};
 
 #[test]
 fn aiming_and_cancel_pause_the_whole_world() {
@@ -98,8 +100,9 @@ fn recovery_ignores_actions_for_exactly_one_update_but_moves_the_projectile() {
 
 #[test]
 fn recovery_spends_airtime_and_applies_player_and_cube_gravity() {
-    let initial = GameState::from_ascii(
+    let initial = GameState::from_ascii_with_settings(
         "############\n#        C #\n#          #\n#          #\n#          #\n#          #\n#          #\n# @        #\n############",
+        GameSettings { allow_airborne_shooting: true, ..GameSettings::default() },
     ).unwrap();
     let fired = initial.step(Jump).step(Shoot).step(Right);
     assert_eq!(fired.player().air_inputs_remaining, 1);
@@ -111,6 +114,67 @@ fn recovery_spends_airtime_and_applies_player_and_cube_gravity() {
     assert_eq!(recovered.player().position, Position { x: 2, y: 7 });
     assert_eq!(recovered.cubes()[0].position, Position { x: 9, y: 7 });
     assert!(recovered.is_grounded());
+}
+
+#[test]
+fn shooting_requires_support_by_default_and_fun_mode_allows_jumps_and_falls() {
+    let map = "##########\n#        #\n#        #\n#        #\n#@       #\n##########";
+    for allow_airborne_shooting in [false, true] {
+        let initial = GameState::from_ascii_with_settings(
+            map,
+            GameSettings {
+                allow_airborne_shooting,
+                ..GameSettings::default()
+            },
+        )
+        .unwrap();
+        assert!(initial.can_shoot());
+        let jumping = initial.step(Jump);
+        assert!(!jumping.is_grounded());
+        assert!(jumping.player().air_inputs_remaining > 0);
+        let falling =
+            GameState::from_ascii_with_settings("@\n \n \n \n#", initial.settings()).unwrap();
+        assert_eq!(falling.player().air_inputs_remaining, 0);
+        for airborne in [jumping, falling] {
+            assert_eq!(airborne.can_shoot(), allow_airborne_shooting);
+            if allow_airborne_shooting {
+                let aiming = airborne.step(Shoot);
+                assert_eq!(aiming.player().mode, PlayerMode::Aiming);
+                assert_eq!(aiming.step(Shoot), airborne);
+                let fired = aiming.step(Right);
+                assert!(fired.projectile().is_some());
+                assert_eq!(fired.player().mode, PlayerMode::Recovering);
+                assert_eq!(fired.settings(), initial.settings());
+            } else {
+                assert_eq!(airborne.step(Shoot), airborne);
+            }
+        }
+    }
+    let default = GameState::from_ascii(map).unwrap();
+    assert_eq!(default.settings(), GameSettings::default());
+    assert_ne!(
+        default,
+        GameState::from_ascii_with_settings(
+            map,
+            GameSettings {
+                allow_airborne_shooting: true,
+                ..GameSettings::default()
+            }
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn standing_on_either_cube_kind_allows_a_grounded_shot() {
+    for cube in ['C', 'O'] {
+        let initial =
+            GameState::from_ascii(&format!("########\n# @    #\n# {cube}    #\n########")).unwrap();
+        assert!(initial.is_grounded());
+        let fired = initial.step(Shoot).step(Right);
+        assert_eq!(fired.player().mode, PlayerMode::Recovering);
+        assert!(fired.projectile().is_some());
+    }
 }
 
 #[test]

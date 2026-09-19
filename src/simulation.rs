@@ -69,6 +69,17 @@ pub enum GameStatus {
     GameOver,
 }
 
+/// Rules fixed for a game and all states derived from it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GameSettings {
+    /// Fun mode: allow firing without support, including during jump airtime.
+    /// The default requires solid support immediately below the player.
+    pub allow_airborne_shooting: bool,
+    /// Fun mode: allow pushing cubes during jumps and falls.
+    /// The default requires solid support immediately below the player.
+    pub allow_airborne_pushing: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tile {
     Empty,
@@ -131,7 +142,8 @@ pub enum GameInput {
     Left,
     Right,
     Jump,
-    /// Enter aiming mode, or cancel it without advancing time, unless recovering.
+    /// Enter aiming mode when shooting is allowed, or cancel it without
+    /// advancing time, unless recovering.
     Shoot,
     Wait,
 }
@@ -148,6 +160,7 @@ pub struct PlayerState {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GameState {
     level: Arc<Level>,
+    settings: GameSettings,
     player: PlayerState,
     cubes: Vec<Cube>,
     projectile: Option<Projectile>,
@@ -163,6 +176,15 @@ impl GameState {
     /// for all bodies and projectiles. Unknown tiles stop projectiles but do not
     /// block player movement or supply ground support.
     pub fn from_ascii(map: &str) -> Result<Self, ParseLevelError> {
+        Self::from_ascii_with_settings(map, GameSettings::default())
+    }
+
+    /// Parses a level with explicit rules. Ordinary play and solver entry points
+    /// use [`Self::from_ascii`] for default grounded-only shooting and pushing.
+    pub fn from_ascii_with_settings(
+        map: &str,
+        settings: GameSettings,
+    ) -> Result<Self, ParseLevelError> {
         let lines: Vec<_> = map.trim_end_matches(['\n', '\r']).lines().collect();
         let width = lines
             .iter()
@@ -222,6 +244,7 @@ impl GameState {
 
         Ok(Self {
             level: Arc::new(level),
+            settings,
             player: PlayerState {
                 position: player_position.ok_or(ParseLevelError::MissingPlayer)?,
                 air_inputs_remaining: 0,
@@ -235,6 +258,10 @@ impl GameState {
 
     pub fn level(&self) -> &Level {
         &self.level
+    }
+
+    pub fn settings(&self) -> GameSettings {
+        self.settings
     }
 
     pub fn player(&self) -> PlayerState {
@@ -279,16 +306,26 @@ impl GameState {
         self.is_solid(self.player.position.offset(0, 1))
     }
 
+    /// Whether the rules allow aiming/firing at the current position. The shot
+    /// must also have a free adjacent tile in the chosen direction.
+    pub fn can_shoot(&self) -> bool {
+        self.settings.allow_airborne_shooting || self.is_grounded()
+    }
+
     /// Returns the next state without changing this state.
     ///
     /// Shoot toggles aiming without advancing time. While aiming, a valid
     /// left/right input fires instead of walking; other inputs leave time paused.
     /// A blocked shot keeps aiming and preserves the previous cube/projectile.
+    /// Without airborne shooting enabled, Shoot is ignored while unsupported
+    /// and in Normal mode, without advancing time. Cancelling aim always works.
     /// A successful shot enters Recovering: the following input only advances
     /// physics and consumes airtime, then restores Normal mode. Use Wait for
     /// this forced update when playing or searching for solutions.
     /// Walking pushes any contiguous horizontal chain of cubes one tile if the
-    /// space beyond it is not solid. A blocked push leaves the whole chain in place.
+    /// space beyond it is not solid and the player is grounded (unless airborne
+    /// pushing is enabled). A blocked push leaves the whole chain in place but
+    /// still advances time, including airtime and gravity.
     ///
     /// An update resolves the action, moves the projectile up to two tiles, then
     /// applies up to two gravity substeps to player and cubes. Within each gravity
@@ -308,8 +345,10 @@ impl GameState {
         } else if input == GameInput::Shoot {
             next.player.mode = if next.player.mode == PlayerMode::Aiming {
                 PlayerMode::Normal
-            } else {
+            } else if next.can_shoot() {
                 PlayerMode::Aiming
+            } else {
+                return next;
             };
             return next;
         } else if next.player.mode == PlayerMode::Aiming {
@@ -370,6 +409,9 @@ impl GameState {
     }
 
     fn try_shoot(&mut self, direction: Direction) -> bool {
+        if !self.can_shoot() {
+            return false;
+        }
         let adjacent = self.player.position.offset(direction.dx(), 0);
         // Validate before removing anything: a blocked shot preserves the world.
         if self.blocks_projectile(adjacent) {
@@ -493,6 +535,9 @@ impl GameState {
             }
             match self.cubes.iter().position(|cube| cube.position == target) {
                 Some(index) => {
+                    if !self.settings.allow_airborne_pushing && !self.is_grounded() {
+                        return false;
+                    }
                     chain.push(index);
                     target = target.offset(dx, 0);
                 }

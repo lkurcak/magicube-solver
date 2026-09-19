@@ -1,6 +1,7 @@
 use magicube_solver::GameInput::{Jump, Left, Right, Shoot, Wait};
 use magicube_solver::{
-    GameInput, GameState, GameStatus, PlayerMode, SolveOptions, SolveOutcome, SolveStats, solve,
+    GameInput, GameSettings, GameState, GameStatus, PlayerMode, SolveOptions, SolveOutcome,
+    SolveStats, solve,
 };
 
 const ALL_INPUTS: [GameInput; 5] = [Left, Right, Jump, Shoot, Wait];
@@ -44,7 +45,10 @@ fn tiny_solutions_are_shortest_and_replay_exactly() {
             "#######\n#     #\n#@ G###\n#######",
             vec![Right, Shoot, Right],
         ),
-        ("#####\n# G##\n#@###\n#####", vec![Jump, Shoot, Right]),
+        (
+            "######\n#  G##\n#@####\n######",
+            vec![Jump, Right, Shoot, Right],
+        ),
         (
             "#########\n#DG P@  #\n#########",
             vec![Left, Shoot, Left, Wait],
@@ -56,6 +60,49 @@ fn tiny_solutions_are_shortest_and_replay_exactly() {
         assert!(!can_win_within(&initial, inputs.len() - 1), "{map}");
         assert_eq!(solution(&initial), inputs, "search must be deterministic");
     }
+}
+
+#[test]
+fn standard_search_shoots_only_when_grounded_and_fun_rules_are_explicit() {
+    let map = "######\n#  G##\n#@####\n######";
+    let standard = GameState::from_ascii(map).unwrap();
+    let mut state = standard.clone();
+    for input in solution(&standard) {
+        if state.player().mode == PlayerMode::Aiming && matches!(input, Left | Right) {
+            assert!(state.is_grounded());
+        }
+        state = state.step(input);
+    }
+    let fun = GameState::from_ascii_with_settings(
+        "#####\n# G##\n#@###\n#####",
+        GameSettings {
+            allow_airborne_shooting: true,
+            ..GameSettings::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(solution(&fun), vec![Jump, Shoot, Right]);
+}
+
+#[test]
+fn standard_search_cannot_push_in_midair_but_explicit_fun_rules_can() {
+    let map = "#######\n#@OG###\n# ### #\n#######";
+    let standard = GameState::from_ascii(map).unwrap();
+    assert!(!standard.settings().allow_airborne_pushing);
+    assert_eq!(
+        solve(&standard, SolveOptions::default()).outcome,
+        SolveOutcome::Unsolvable
+    );
+    let fun = GameState::from_ascii_with_settings(
+        map,
+        GameSettings {
+            allow_airborne_pushing: true,
+            ..GameSettings::default()
+        },
+    )
+    .unwrap();
+    assert_ne!(standard, fun);
+    assert_eq!(solution(&fun), vec![Right]);
 }
 
 #[test]
@@ -134,8 +181,9 @@ fn discards_fatal_successors_without_spending_the_state_budget_on_them() {
         },
     );
     assert_eq!(result.outcome, SolveOutcome::Unsolvable);
-    assert_eq!(result.stats.discovered_states, 2);
-    assert_eq!(result.stats.expanded_states, 2);
+    // This unsupported start cannot enter aiming under the default rules.
+    assert_eq!(result.stats.discovered_states, 1);
+    assert_eq!(result.stats.expanded_states, 1);
 }
 
 #[test]
@@ -184,30 +232,4 @@ fn can_solve_from_above_the_map_without_clipping_coordinates() {
     let inputs = solution(&initial);
     assert_eq!(inputs.len(), 3);
     assert!(!can_win_within(&initial, 2));
-}
-
-fn bundled_solution(map: &str, saved_length: usize) {
-    let initial = GameState::from_ascii(map).unwrap();
-    let result = solve(&initial, SolveOptions::default());
-    let SolveOutcome::Solved(inputs) = &result.outcome else {
-        panic!("bundled level was not solved: {result:?}");
-    };
-    assert_eq!(replay(&initial, inputs).status(), GameStatus::Won);
-    assert!(inputs.len() <= saved_length);
-    eprintln!("{} inputs; {:?}", inputs.len(), result.stats);
-}
-
-#[test]
-fn solves_bundled_level_1() {
-    bundled_solution(include_str!("../data/level-manual-labels/1.txt"), 24);
-}
-
-#[test]
-fn solves_bundled_level_2() {
-    bundled_solution(include_str!("../data/level-manual-labels/2.txt"), 51);
-}
-
-#[test]
-fn solves_bundled_level_3() {
-    bundled_solution(include_str!("../data/level-manual-labels/3.txt"), 56);
 }

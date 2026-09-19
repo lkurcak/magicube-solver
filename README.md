@@ -21,7 +21,8 @@ Print level 1 with the original prototype binary:
 cargo run --bin magicube-solver
 ```
 
-The search engine is available through the Rust library API described below.
+The search engine is available through the Rust library API and the terminal
+player's `--solve` replay mode described below.
 
 Open the interactive level selector for the bundled levels:
 
@@ -57,8 +58,43 @@ key uses the terminal's normal key repeat. Resizing redraws without advancing ti
 | Q / Esc / Ctrl-C | Quit |
 
 The startup selector uses Ratatui's stateful list widget. Choose a bundled level
-with Up/Down or J/K, preview it alongside the list, and press Enter to play.
+with Up/Down or J/K and preview it alongside the list:
+
+| Key | Level selector action |
+| --- | --- |
+| Enter | Play the highlighted level |
+| S | Solve the highlighted level and open its replay |
+| R | Browse saved attempts for the highlighted level |
+| F | Toggle airborne shooting for manual play (off by default) |
+| P | Toggle airborne pushing for manual play (off by default) |
+| Q / Esc | Quit |
+
+Closing a solver replay returns to the level selector, retaining the highlighted
+level. Closing a saved replay returns to the saved-attempt list; Q/Esc there goes
+back to the level selector. The saved-attempt list shows outcome, input count,
+shooting/pushing rules, and filename, newest first. It matches the embedded starting map, so renamed
+levels and files still work. It uses the normal solutions directory, including
+any `--solutions-dir` override. Browsing an empty directory does not create it.
 Passing a level file on the command line skips the selector.
+
+By default, aiming, firing, and pushing cubes require ground support, including
+standing on another cube. Pressing X without support does nothing and does not
+advance time. A blocked airborne push still advances time and gravity; walking
+through empty space in midair remains allowed.
+For fun, toggle airborne shooting with **F** or airborne pushing with **P** in
+the selector, or use either or both flags:
+
+```sh
+cargo run -p magicube-play -- --airborne-shooting
+cargo run -p magicube-play -- --airborne-pushing
+```
+
+These independent options permit shots or pushes throughout jumps and falls.
+They apply to manual play for the session and are preserved by undo and restart.
+You can also combine the flags with a level-file path. The game and replay
+headers show both active rules. **S** and `--solve` always solve with the default
+grounded-only rules, regardless of the manual-play toggles. During gameplay,
+**P** still saves your inputs; it only toggles pushing in the selector.
 
 The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
@@ -94,14 +130,20 @@ automatic save; undoing or restarting and winning again saves a new record.
 A save failure is displayed without interrupting play; press **P** to retry.
 Saving does not advance time or add an undo entry.
 
-Records include a format version, game version, level name, the complete starting
-ASCII map, outcome (`in_progress`, `won`, or `game_over`), and an ordered `inputs`
+New records use format version **3** and include a game version, level name, the
+complete starting ASCII map,
+`settings: { "allow_airborne_shooting": false, "allow_airborne_pushing": false }`
+(each independently `false` or `true`), outcome (`in_progress`, `won`, or `game_over`), and an ordered `inputs`
 array. Input names are `left`, `right`, `jump`, `shoot`, and `wait`;
 aiming/cancelling are retained as `shoot` inputs. Automatic recovery updates are
 recorded explicitly as `wait`. Undone inputs are excluded and
 restart clears the sequence. A partial attempt can also be saved while aiming.
 The embedded map makes the record usable without the original level file or
-checkout: parse `level.map` and apply `inputs` in order to replay it.
+checkout: parse `level.map` with the recorded settings and apply `inputs` in
+order to replay it. Version-3 records require both settings explicitly. Older
+version-1 records allow both airborne shooting and pushing; version-2 records
+use their recorded shooting setting and allow airborne pushing. This preserves
+the original rules. Loading old records does not modify their files.
 
 Run the test suite, including exact reproduction of all authoritative levels:
 
@@ -111,6 +153,67 @@ cargo test --workspace
 
 See [`data/tile-templates/README.md`](data/tile-templates/README.md) for the
 template and manual-label workflow.
+
+## Replay saved inputs and solver solutions
+
+Start `cargo run -p magicube-play` and use **S** or **R** in the level selector
+to open replays directly in the game. No extra flags are needed. Solver failures
+and saved-file errors appear in the menu so you can choose another attempt.
+
+You can also load a saved solution JSON directly, including partial attempts
+and game-over records:
+
+```sh
+cargo run -p magicube-play -- --replay /path/to/solution.json
+```
+
+The embedded map supplies the starting level, so the original level file is not
+needed. Replays use their recorded rules independently of the menu's current
+toggles; the CLI rejects `--airborne-shooting` or `--airborne-pushing` together
+with `--replay` or `--solve`.
+Unsupported format versions, malformed inputs, and a final outcome that
+differs from the saved outcome produce an error before entering the replay.
+
+Find a shortest solution and open it in the same replay viewer:
+
+```sh
+cargo run --release -p magicube-play -- --solve data/level-manual-labels/4.txt
+```
+
+Omit the level path to choose a bundled level:
+
+```sh
+cargo run --release -p magicube-play -- --solve
+```
+
+With `--solve`, Enter in the selector also launches a solver replay.
+
+The solver uses its default one-million-state cap. If it cannot find a complete
+solution within that cap, or exhausts an unsolvable level, it reports the outcome
+in the menu (or exits with an error when a level file was passed directly).
+
+Replays start paused at step **0**, the original state. Step **N** is the state
+after applying the first N recorded inputs. Every input is shown separately,
+including aiming, cancelling, ignored inputs, and recovery waits. The header
+shows the current step and total, the last and next inputs, and the game status.
+
+| Key | Replay action |
+| --- | --- |
+| Left / A | Back one input |
+| Right / D | Forward one input |
+| Up / Page Up | Back ten inputs |
+| Down / Page Down | Forward ten inputs |
+| Home | Jump to the initial state |
+| End | Jump to the final state |
+| Space | Play or pause at four inputs per second |
+| Q / Esc / Ctrl-C | Close replay (return to its menu, or exit for a direct file) |
+
+Seeking pauses automatic playback and clamps at the start/end. Playback stops at
+the final step; pressing Space there plays again from the start. Backward steps
+restore the exact earlier state, including cubes, projectiles, and airtime.
+Paused recovery frames stay paused until you advance them. Replays never save
+new attempts or modify the recorded sequence, and normal gameplay keys such as
+jump, shoot, and save are inactive in the viewer.
 
 ## Solver library
 
@@ -141,6 +244,13 @@ inputs, not elapsed simulation updates. Equally short solutions are selected
 deterministically using left, right, jump, shoot, wait order; recovery always uses
 wait. Returned inputs replay directly through `GameState::step`.
 
+`GameState::from_ascii` uses `GameSettings::default()`, with airborne shooting
+and pushing disabled. The library search follows its initial state's rules; deliberately
+searching a fun variant requires constructing that state with
+`GameState::from_ascii_with_settings(map, GameSettings { allow_airborne_shooting: true, ..GameSettings::default() })`.
+Use `allow_airborne_pushing: true` to opt into airborne pushing independently.
+The terminal's solver entry points always construct the default state.
+
 The default cap is one million distinct retained states, including the initial
 state and any discovered win. Set `SolveOptions { max_states: Some(2_000_000) }`
 to raise it, or `SolveOptions { max_states: None }` to remove it. A zero cap stops
@@ -158,11 +268,13 @@ discarded game-over successors) and `expanded_states` (states whose successor
 generation began, including a partially processed final state). Terminal starts
 and a zero-cap search report zero for both counts.
 
-The normal test suite solves and replays bundled levels 1–3. To run only those
-regressions with optimizations and display their search counts:
+The normal test suite solves bundled levels 1–7 using the default state cap,
+replays both saved and solver solutions, and checks that each solver solution
+uses no more inputs than its saved counterpart. To run only those regressions
+with optimizations and display their input and search counts:
 
 ```sh
-cargo test --release --locked --test solver solves_bundled -- --nocapture
+cargo test --release --locked --test solutions -- --nocapture
 ```
 
 ## Game simulation
@@ -179,7 +291,7 @@ println!("{}", next.to_ascii());
 ```
 
 `GameState::step` returns a new state and leaves its input unchanged. States share
-an immutable `Level`; dynamic state includes the player, aiming/recovery mode, cubes,
+an immutable `Level` and retain their `GameSettings`; dynamic state includes the player, aiming/recovery mode, cubes,
 projectile, and game status. Equality and hashing include all of these. The solver
 compares the complete dynamic state while omitting the shared level from hashing.
 
@@ -187,8 +299,10 @@ Movement updates work as follows:
 
 - Left/right attempt to move one tile. `#` walls, closed `D` gates, and both kinds of cube are solid
   and support the player. Walking into a cube pushes the entire contiguous row
-  of cubes one tile, provided the space beyond it is not solid. There is no limit
-  on chain length, and a wall blocks the whole push. Pushed cubes then fall normally.
+  of cubes one tile, provided the player is grounded and the space beyond it is
+  not solid. `allow_airborne_pushing` removes only the support requirement.
+  There is no limit on chain length, and a wall blocks the whole push.
+  Pushed cubes then fall normally.
   Other map symbols do not block player or cube movement.
 - Jump requires solid support immediately below and free space above. It rises one tile
   and grants two subsequent air inputs. Left/right and waiting spend those inputs;
@@ -202,7 +316,10 @@ Movement updates work as follows:
 pressure plate, every `D` gate behaves like a wall for movement, gravity, and
 projectiles. Otherwise gates are passable.
 
-`Shoot` toggles aiming without advancing time. While aiming, left/right attempts
+With default settings, `Shoot` enters aiming only while grounded. Unsupported
+attempts are ignored without advancing time. Set `allow_airborne_shooting` to
+allow entering aim and firing anywhere in the air, including during jumps.
+Entering/cancelling aim never advances time. While aiming, left/right attempts
 to fire and other movement inputs are ignored. A blocked shot stays in aiming mode
 and preserves the previous cube and projectile. The adjacent tile must be
 unoccupied and passable before firing (empty, goal, torch, skull, pressure plate,
