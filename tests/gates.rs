@@ -97,6 +97,7 @@ fn active_gates_block_players_cubes_and_projectiles() {
     .step(GameInput::Right)
     .step(GameInput::Shoot)
     .step(GameInput::Left)
+    .step(GameInput::Wait)
     .step(GameInput::Wait);
     assert!(projectile.projectile().is_none());
     assert!(

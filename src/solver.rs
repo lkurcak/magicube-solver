@@ -58,7 +58,7 @@ pub struct SolveResult {
 /// the standard grounded-only rules; non-default settings require an explicit
 /// [`GameState::from_ascii_with_settings`] call.
 ///
-/// Each input costs one, including entering/cancelling aim and the forced
+/// Each input costs one, including entering/cancelling aim and every forced
 /// recovery update (represented by `Wait`). Ties use the deterministic order
 /// left, right, jump, shoot, wait. The returned inputs replay directly through
 /// [`GameState::step`], even when starting while aiming or recovering.

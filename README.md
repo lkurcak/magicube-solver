@@ -5,15 +5,38 @@ that converts pixel-perfect level screenshots into character tile maps.
 
 The importer uses 8x8 image templates and detects each screenshot's grid phase
 independently. Manually labeled levels are authoritative training fixtures;
-unknown visual variants are emitted as `?` for later labeling.
+unknown or conflicting visual variants are emitted as `?` for later labeling.
+Adding a PNG to `data/level-screenshots/` automatically adds it to the compiled
+player's level selector on the next build. No ASCII transcription or level-list
+edit is needed.
 
 ## Usage
 
-Generate maps under the ignored `data/levels/` directory:
+Export maps and repair diagnostics under the ignored `data/levels/` directory:
 
 ```sh
 cargo run --bin screenshots-to-maps
 ```
+
+This command is optional for playing: the player imports and embeds levels during
+its Cargo build, using the same catalog builder. Generated build assets live in
+Cargo's `OUT_DIR`; the compiled game needs no screenshots or data directory at runtime.
+Screenshot filenames determine level IDs and numeric ordering (1, 2, …, 10).
+The build watches screenshots, manual labels, the atlas, and its referenced templates.
+Removing a screenshot removes its bundled entry on the next build.
+
+Only clean imports can be played or solved from the selector. A clean import has
+unambiguous alignment and tile recognition, parses as a game map, and contains a
+goal. This does not prove solvability. Problem entries are listed as **Corrupted**
+and can be previewed when a map is available; play and replay actions are disabled.
+One bad screenshot does not prevent the other levels from being bundled. Broken
+shared atlas configuration fails the build.
+
+When a level is corrupted, run `screenshots-to-maps` and inspect
+`data/levels/import-report.txt` and `data/levels/unknown-tiles/`. Add a labeled
+template or a manual level example, then rebuild. The converter exports available
+maps even when some levels fail, and exits unsuccessfully if any entry is corrupted.
+It accepts optional `[screenshots-dir] [levels-dir] [atlas-dir] [labels-dir]` arguments.
 
 Print level 1 with the original prototype binary:
 
@@ -39,9 +62,10 @@ cargo run -p magicube-play -- data/level-manual-labels/2.txt
 The player runs in a separate workspace crate using Crossterm for immediate
 keyboard input and colored terminal rendering, with one character per tile just
 like the level files. Movement, firing, and waiting advance the core simulator;
-aiming pauses time. A successful shot is displayed for 120 ms, then the game
-automatically advances one recovery update before accepting another action.
-Keys pressed during that pause are handled after recovery. No Enter key is needed, and holding a
+aiming pauses time. A successful shot and its first recovery state are each
+displayed for 120 ms while the game automatically advances two recovery updates
+before accepting another action. Keys pressed during those pauses are handled
+after recovery. No Enter key is needed, and holding a
 key uses the terminal's normal key repeat. Resizing redraws without advancing time.
 
 | Key | Action |
@@ -130,20 +154,22 @@ automatic save; undoing or restarting and winning again saves a new record.
 A save failure is displayed without interrupting play; press **P** to retry.
 Saving does not advance time or add an undo entry.
 
-New records use format version **3** and include a game version, level name, the
+New records use format version **5** and include a game version, level name, the
 complete starting ASCII map,
-`settings: { "allow_airborne_shooting": false, "allow_airborne_pushing": false }`
-(each independently `false` or `true`), outcome (`in_progress`, `won`, or `game_over`), and an ordered `inputs`
+`settings: { "allow_airborne_shooting": false, "allow_airborne_pushing": false, "projectile_tiles_per_update": 3, "shot_recovery_updates": 2, "projectile_moves_on_firing_update": false }`,
+outcome (`in_progress`, `won`, or `game_over`), and an ordered `inputs`
 array. Input names are `left`, `right`, `jump`, `shoot`, and `wait`;
 aiming/cancelling are retained as `shoot` inputs. Automatic recovery updates are
 recorded explicitly as `wait`. Undone inputs are excluded and
 restart clears the sequence. A partial attempt can also be saved while aiming.
 The embedded map makes the record usable without the original level file or
 checkout: parse `level.map` with the recorded settings and apply `inputs` in
-order to replay it. Version-3 records require both settings explicitly. Older
-version-1 records allow both airborne shooting and pushing; version-2 records
-use their recorded shooting setting and allow airborne pushing. This preserves
-the original rules. Loading old records does not modify their files.
+order to replay it. Version-5 records include the recovery and firing-timing
+settings explicitly. Older version-1 records allow both airborne shooting and
+pushing; version-2 records
+use their recorded shooting setting and allow airborne pushing. Formats 1–4 use
+one recovery update and move projectiles during firing, preserving their original
+rules. Loading old records does not modify their files.
 
 Run the test suite, including exact reproduction of all authoritative levels:
 
@@ -268,9 +294,9 @@ discarded game-over successors) and `expanded_states` (states whose successor
 generation began, including a partially processed final state). Terminal starts
 and a zero-cap search report zero for both counts.
 
-The normal test suite solves bundled levels 1–7 using the default state cap,
-replays both saved and solver solutions, and checks that each solver solution
-uses no more inputs than its saved counterpart. To run only those regressions
+The normal test suite solves every bundled level that remains solvable under the
+default timing, verifies level 6's legacy-timing solution separately, replays
+saved and solver solutions, and compares their input counts. To run only those regressions
 with optimizations and display their input and search counts:
 
 ```sh
@@ -291,7 +317,7 @@ println!("{}", next.to_ascii());
 ```
 
 `GameState::step` returns a new state and leaves its input unchanged. States share
-an immutable `Level` and retain their `GameSettings`; dynamic state includes the player, aiming/recovery mode, cubes,
+an immutable `Level` and retain their `GameSettings`; dynamic state includes the player, aiming/recovery mode and counter, cubes,
 projectile, and game status. Equality and hashing include all of these. The solver
 compares the complete dynamic state while omitting the shared level from hashing.
 
@@ -327,15 +353,20 @@ or an inactive gate).
 A successful shot immediately removes the
 previous `O` cube and replaces any previous projectile, leaving map cubes intact.
 
-A successful shot sets `player().mode` to `PlayerMode::Recovering`. The next
-update ignores player actions (including jump and shoot), advances projectiles,
-spends airtime, and applies gravity normally, then returns to `Normal`. Call
-`step(GameInput::Wait)` for this forced update. Blocked shots and cancelled aiming
-do not trigger recovery. A win or game over freezes the state immediately,
-including when it happens during firing or recovery.
+A successful shot sets `player().mode` to `PlayerMode::Recovering` while
+`recovery_updates_remaining` is nonzero. By default, the next two updates ignore
+player actions (including jump and shoot), advance projectiles, spend airtime,
+and apply gravity normally before returning to `Normal`. Call
+`step(GameInput::Wait)` for each forced update. `shot_recovery_updates` configures
+the count and may be zero. Blocked shots and cancelled aiming do not trigger
+recovery. A win or game over freezes the state immediately, including when it
+happens during firing or recovery.
 
-Projectiles move two tiles per update, including the firing update, checking each
-tile in order. Goals, torches, and skulls are passable; walls, unknown terrain, and occupied tiles stop
+Projectiles move `projectile_tiles_per_update` tiles per update (three by default),
+checking each tile in order. Newly fired projectiles do not move during the
+firing update by default, allowing gravity to react after the previous `O` is
+removed; `projectile_moves_on_firing_update` reproduces older timing. Goals,
+torches, and skulls are passable; walls, unknown terrain, and occupied tiles stop
 a projectile and create an `O` cube in its last free position. After projectile movement, gravity runs in
 two single-tile substeps for both player and cubes, processing lower bodies first.
 This lets stacks fall together and prevents cubes from skipping through platforms

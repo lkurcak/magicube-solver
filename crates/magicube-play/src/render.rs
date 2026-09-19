@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn replay_renders_cursor_inputs_and_controls_without_advancing() {
-        let initial = GameState::from_ascii("#######\n#     #\n#@ G###\n#######").unwrap();
+        let initial = GameState::from_ascii("########\n#      #\n#@  G###\n########").unwrap();
         let mut replay = Replay::new(
             initial,
             vec![GameInput::Shoot, GameInput::Right, GameInput::Wait],

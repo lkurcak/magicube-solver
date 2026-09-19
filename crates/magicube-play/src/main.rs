@@ -22,44 +22,28 @@ use terminal::TerminalSession;
 
 #[derive(Debug, Clone, Copy)]
 struct BundledLevel {
+    id: &'static str,
     name: &'static str,
-    map: &'static str,
+    map: Option<&'static str>,
+    issues: &'static [&'static str],
 }
 
-const BUNDLED_LEVELS: &[BundledLevel] = &[
-    BundledLevel {
-        name: "Level 1",
-        map: include_str!("../../../data/level-manual-labels/1.txt"),
-    },
-    BundledLevel {
-        name: "Level 2",
-        map: include_str!("../../../data/level-manual-labels/2.txt"),
-    },
-    BundledLevel {
-        name: "Level 3",
-        map: include_str!("../../../data/level-manual-labels/3.txt"),
-    },
-    BundledLevel {
-        name: "Level 4",
-        map: include_str!("../../../data/level-manual-labels/4.txt"),
-    },
-    BundledLevel {
-        name: "Level 5",
-        map: include_str!("../../../data/level-manual-labels/5.txt"),
-    },
-    BundledLevel {
-        name: "Level 6",
-        map: include_str!("../../../data/level-manual-labels/6.txt"),
-    },
-    BundledLevel {
-        name: "Level 7",
-        map: include_str!("../../../data/level-manual-labels/7.txt"),
-    },
-    BundledLevel {
-        name: "Level 8",
-        map: include_str!("../../../data/level-manual-labels/8.txt"),
-    },
-];
+impl BundledLevel {
+    fn is_clean(self) -> bool {
+        self.map.is_some() && self.issues.is_empty()
+    }
+
+    fn playable_map(self) -> io::Result<&'static str> {
+        self.map.filter(|_| self.is_clean()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Level {} is corrupted.", self.id),
+            )
+        })
+    }
+}
+
+include!(concat!(env!("OUT_DIR"), "/bundled_levels.rs"));
 const SHOT_RECOVERY_DELAY: Duration = Duration::from_millis(120);
 const HELP: &str = "Usage: magicube-play [--solutions-dir PATH] [--airborne-shooting] [--airborne-pushing] [LEVEL.txt]
        magicube-play --replay SOLUTION.json
@@ -74,7 +58,7 @@ Both are off by default: aiming, shooting and pushing require ground support.
 --airborne-shooting and --airborne-pushing enable them during jumps and falls
 for manual play. Solver launches always use the default grounded-only rules.
 Movement, firing and waiting advance one update. Aiming pauses time.
-Successful shots automatically advance one recovery update after a brief pause.
+Successful shots automatically advance two recovery updates after brief pauses.
 
   Left / A          Move or push left
   Right / D         Move or push right
@@ -171,7 +155,10 @@ fn run() -> Result<(), Box<dyn Error>> {
                 return Ok(());
             };
             let level = BUNDLED_LEVELS[index];
-            (level.map.to_owned(), format!("{} (bundled)", level.name))
+            (
+                level.playable_map()?.to_owned(),
+                format!("{} (bundled)", level.name),
+            )
         }
     };
     if options.solve {

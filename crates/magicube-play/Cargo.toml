@@ -11,3 +11,6 @@ magicube-solver = { path = "../.." }
 ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[build-dependencies]
+magicube-solver = { path = "../.." }

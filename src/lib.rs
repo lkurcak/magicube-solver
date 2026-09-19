@@ -1,3 +1,4 @@
+pub mod level_catalog;
 pub mod screenshot_import;
 pub mod simulation;
 pub mod solver;

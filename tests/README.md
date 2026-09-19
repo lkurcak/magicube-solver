@@ -17,12 +17,18 @@ saved input sequence. Length bounds come directly from the saved inputs.
 with exhaustive enumeration of shorter inputs, and covers terminal states,
 aiming/recovery, state limits, cycles, and open maps.
 `level_drawing.rs` checks the ASCII fixture helper.
+`catalog.rs` checks screenshot discovery and natural ordering, isolated import
+failures, learning new tile patterns across levels, conflicting teaching examples,
+and converter reports/crop exports. Library tests reproduce all manual fixtures
+and cover ambiguous grid phases, transactional training, and conflict diagnostics.
 
 The `magicube-play` crate also tests replay navigation, exact snapshot restoration,
 play/pause timing and endpoint behavior, saved-record validation, solver-to-replay
 integration, replay controls/rendering, and command-line mode selection.
 Menu tests cover solver/saved-replay actions and empty lists; save discovery
 tests check map matching, directory overrides, and newest-first ordering.
+Menu tests also check screenshot-only bundled levels, corrupted previews, and
+blocked launch actions for corrupted imports.
 Replay records test explicit version-3 shooting/pushing settings, version-1 and
 version-2 compatibility, and settings preservation on round trips, undo and restart.
 

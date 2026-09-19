@@ -40,14 +40,14 @@ fn can_win_within(state: &GameState, remaining: usize) -> bool {
 fn tiny_solutions_are_shortest_and_replay_exactly() {
     for (map, expected) in [
         ("######\n#@OG #\n######", vec![Right]),
-        ("#####\n#@G##\n#####", vec![Shoot, Right]),
+        ("#####\n#@G##\n#####", vec![Shoot, Right, Wait]),
         (
             "#######\n#     #\n#@ G###\n#######",
-            vec![Right, Shoot, Right],
+            vec![Shoot, Right, Wait],
         ),
         (
             "######\n#  G##\n#@####\n######",
-            vec![Jump, Right, Shoot, Right],
+            vec![Jump, Right, Shoot, Right, Wait],
         ),
         (
             "#########\n#DG P@  #\n#########",
@@ -81,7 +81,7 @@ fn standard_search_shoots_only_when_grounded_and_fun_rules_are_explicit() {
         },
     )
     .unwrap();
-    assert_eq!(solution(&fun), vec![Jump, Shoot, Right]);
+    assert_eq!(solution(&fun), vec![Jump, Shoot, Right, Wait]);
 }
 
 #[test]
@@ -107,13 +107,13 @@ fn standard_search_cannot_push_in_midair_but_explicit_fun_rules_can() {
 
 #[test]
 fn starts_while_aiming_or_recovering_and_wins_during_recovery() {
-    let initial = GameState::from_ascii("#######\n#     #\n#@ G###\n#######").unwrap();
+    let initial = GameState::from_ascii("########\n#      #\n#@  G###\n########").unwrap();
     let aiming = initial.step(Shoot);
     let recovering = aiming.step(Right);
     assert_eq!(recovering.player().mode, PlayerMode::Recovering);
-    assert_eq!(solution(&aiming), vec![Right, Wait]);
-    assert_eq!(solution(&recovering), vec![Wait]);
-    assert!(!can_win_within(&aiming, 1));
+    assert_eq!(solution(&aiming), vec![Right, Wait, Wait]);
+    assert_eq!(solution(&recovering), vec![Wait, Wait]);
+    assert!(!can_win_within(&aiming, 2));
 
     let blocked_aim = GameState::from_ascii("######\n#@OG #\n######")
         .unwrap()
@@ -126,7 +126,8 @@ fn terminal_starts_need_no_search_even_with_a_zero_cap() {
     let won = GameState::from_ascii("#####\n#@G##\n#####")
         .unwrap()
         .step(Shoot)
-        .step(Right);
+        .step(Right)
+        .step(Wait);
     let dead = GameState::from_ascii("#####\n# C #\n# @ #\n#####")
         .unwrap()
         .step(Wait);

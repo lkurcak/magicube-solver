@@ -19,6 +19,7 @@ enum Action {
     Select(usize),
     Solve(usize),
     Saved(usize),
+    Corrupted,
     ToggleAirborneShooting,
     ToggleAirbornePushing,
     Quit,
@@ -33,6 +34,18 @@ struct Selection {
 impl Selection {
     fn new(count: usize) -> Self {
         Self { index: 0, count }
+    }
+
+    fn handle_level_key(&mut self, key: KeyEvent, levels: &[BundledLevel]) -> Action {
+        let action = self.handle_key(key);
+        match action {
+            Action::Select(index) | Action::Solve(index) | Action::Saved(index)
+                if !levels[index].is_clean() =>
+            {
+                Action::Corrupted
+            }
+            _ => action,
+        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Action {
@@ -90,10 +103,6 @@ pub fn choose(
     solutions_dir: Option<&Path>,
     play_settings: &mut GameSettings,
 ) -> io::Result<Option<usize>> {
-    assert!(
-        !levels.is_empty(),
-        "level selector requires at least one level"
-    );
     let mut selection = Selection::new(levels.len());
     let mut message = None;
     loop {
@@ -107,10 +116,16 @@ pub fn choose(
         )?;
         message = None;
         match action {
-            Action::Select(index) if !solve => return Ok(Some(index)),
+            Action::Select(index) if !solve => match levels[index].playable_map() {
+                Ok(_) => return Ok(Some(index)),
+                Err(error) => message = Some(error.to_string()),
+            },
             Action::Select(index) | Action::Solve(index) => {
                 let level = levels[index];
-                if let Err(error) = replay::solve_and_run(out, level.name, level.map) {
+                if let Err(error) = level
+                    .playable_map()
+                    .and_then(|map| replay::solve_and_run(out, level.name, map))
+                {
                     message = Some(error.to_string());
                 }
             }
@@ -120,6 +135,7 @@ pub fn choose(
                 }
             }
             Action::Quit => return Ok(None),
+            Action::Corrupted => message = Some("This level is corrupted.".to_owned()),
             Action::ToggleAirborneShooting => {
                 play_settings.allow_airborne_shooting = !play_settings.allow_airborne_shooting
             }
@@ -154,7 +170,7 @@ fn select_level(
             )
         })?;
         match event::read()? {
-            Event::Key(key) => match selection.handle_key(key) {
+            Event::Key(key) => match selection.handle_level_key(key, levels) {
                 Action::Continue => {}
                 action => return Ok(action),
             },
@@ -169,7 +185,7 @@ fn browse_saved(
     level: BundledLevel,
     directory: Option<&Path>,
 ) -> io::Result<()> {
-    let attempts = solutions::list_for_level(level.map, directory)?;
+    let attempts = solutions::list_for_level(level.playable_map()?, directory)?;
     let mut selection = Selection::new(attempts.entries.len());
     let mut message = None;
     loop {
@@ -229,7 +245,11 @@ fn draw(
     frame.render_widget(outer, area);
 
     let sections = Layout::vertical([Constraint::Min(1), Constraint::Length(6)]).split(inner);
-    let actions = if solve {
+    let actions = if levels.is_empty() {
+        "No bundled screenshots found."
+    } else if !levels[selected].is_clean() {
+        "Corrupted | Play and replays unavailable"
+    } else if solve {
         "Enter/S: solver replay | R: saved replays"
     } else {
         "Enter: play | S: solver replay | R: saved replays"
@@ -270,7 +290,7 @@ fn draw(
             Direction::Vertical
         })
         .constraints(if horizontal {
-            [Constraint::Length(22), Constraint::Min(1)]
+            [Constraint::Length(28), Constraint::Min(1)]
         } else {
             [
                 Constraint::Length((levels.len() as u16 + 2).min(inner.height / 2)),
@@ -280,7 +300,9 @@ fn draw(
         .split(inner);
 
     draw_list(frame, chunks[0], levels, selected);
-    draw_preview(frame, chunks[1], levels[selected]);
+    if let Some(level) = levels.get(selected) {
+        draw_preview(frame, chunks[1], *level);
+    }
 }
 
 fn draw_saved(
@@ -340,7 +362,14 @@ fn draw_saved(
 fn draw_list(frame: &mut Frame, area: Rect, levels: &[BundledLevel], selected: usize) {
     let items = levels
         .iter()
-        .map(|level| ListItem::new(level.name))
+        .map(|level| {
+            if level.is_clean() {
+                ListItem::new(level.name)
+            } else {
+                ListItem::new(format!("{} — Corrupted", level.name))
+                    .style(Style::default().fg(Color::Red))
+            }
+        })
         .collect::<Vec<_>>();
     let list = List::new(items)
         .block(
@@ -355,12 +384,12 @@ fn draw_list(frame: &mut Frame, area: Rect, levels: &[BundledLevel], selected: u
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         );
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = ListState::default().with_selected((!levels.is_empty()).then_some(selected));
     frame.render_stateful_widget(list, area, &mut state);
 }
 
 fn draw_preview(frame: &mut Frame, area: Rect, level: BundledLevel) {
-    let preview = Paragraph::new(level.map)
+    let preview = Paragraph::new(level.map.unwrap_or("Preview unavailable."))
         .block(Block::default().title(" Preview ").borders(Borders::ALL))
         .style(Style::default().fg(Color::White))
         .wrap(Wrap { trim: false });
@@ -421,8 +450,10 @@ mod tests {
     #[test]
     fn menu_renders_at_wide_and_narrow_sizes() {
         let levels = [BundledLevel {
+            id: "1",
             name: "Level 1",
-            map: "###\n#@#\n###",
+            map: Some("###\n#@#\n###"),
+            issues: &[],
         }];
         for (width, height) in [(80, 24), (30, 12), (1, 1)] {
             let backend = TestBackend::new(width, height);
@@ -431,6 +462,97 @@ mod tests {
                 terminal
                     .draw(|frame| draw(frame, &levels, 0, solve, GameSettings::default(), None))
                     .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn corrupted_entries_cannot_launch_play_solver_or_saved_replays() {
+        for map in [Some("#@G?"), None] {
+            let levels = [BundledLevel {
+                id: "broken",
+                name: "Level broken",
+                map,
+                issues: &["import failed"],
+            }];
+            let mut selection = Selection::new(1);
+            for code in [KeyCode::Enter, KeyCode::Char('s'), KeyCode::Char('r')] {
+                assert_eq!(
+                    selection.handle_level_key(KeyEvent::new(code, KeyModifiers::NONE), &levels),
+                    Action::Corrupted
+                );
+            }
+            assert!(levels[0].playable_map().is_err());
+            assert!(browse_saved(&mut Vec::new(), levels[0], None).is_err());
+            assert_eq!(
+                selection
+                    .handle_level_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &levels),
+                Action::Quit
+            );
+        }
+    }
+
+    #[test]
+    fn corrupted_and_empty_catalogs_render_with_or_without_previews() {
+        for map in [Some("#@G?"), None] {
+            let levels = [BundledLevel {
+                id: "9",
+                name: "Level 9",
+                map,
+                issues: &["unrecognized tile"],
+            }];
+            for (width, height) in [(80, 24), (30, 12), (1, 1)] {
+                for entries in [&levels[..], &[][..]] {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    for solve in [false, true] {
+                        terminal
+                            .draw(|frame| {
+                                draw(frame, entries, 0, solve, GameSettings::default(), None)
+                            })
+                            .unwrap();
+                    }
+                    if width == 80 && !entries.is_empty() {
+                        let screen = terminal
+                            .backend()
+                            .buffer()
+                            .content
+                            .iter()
+                            .map(|cell| cell.symbol())
+                            .collect::<String>();
+                        assert!(screen.contains("Level 9 — Corrupted"));
+                        assert!(screen.contains(map.unwrap_or("Preview unavailable.")));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn build_bundles_the_screenshot_only_levels_and_clean_entries_launch() {
+        for id in ["9", "10"] {
+            let index = crate::BUNDLED_LEVELS
+                .iter()
+                .position(|level| level.id == id)
+                .unwrap();
+            let level = crate::BUNDLED_LEVELS[index];
+            assert!(level.is_clean(), "{level:?}");
+            magicube_solver::GameState::from_ascii(level.playable_map().unwrap()).unwrap();
+            let mut selection = Selection {
+                index,
+                count: crate::BUNDLED_LEVELS.len(),
+            };
+            for (code, action) in [
+                (KeyCode::Enter, Action::Select(index)),
+                (KeyCode::Char('s'), Action::Solve(index)),
+                (KeyCode::Char('r'), Action::Saved(index)),
+            ] {
+                assert_eq!(
+                    selection.handle_level_key(
+                        KeyEvent::new(code, KeyModifiers::NONE),
+                        crate::BUNDLED_LEVELS
+                    ),
+                    action
+                );
             }
         }
     }

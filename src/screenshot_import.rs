@@ -11,6 +11,7 @@ pub const TILE_SIZE: u32 = 8;
 pub struct Atlas {
     templates: Vec<Template>,
     anchor_index: usize,
+    template_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -49,14 +50,18 @@ pub struct UnknownTile {
     pub hash: u64,
     pub image: RgbaImage,
     pub positions: Vec<(usize, usize)>,
+    /// Why this visual pattern could not be assigned a unique symbol.
+    pub reason: String,
 }
 
 impl Atlas {
     pub fn load(directory: &Path) -> Result<Self, Box<dyn Error>> {
         let manifest_path = directory.join("atlas.txt");
-        let manifest = fs::read_to_string(&manifest_path)?;
+        let manifest = fs::read_to_string(&manifest_path)
+            .map_err(|error| invalid_data(format!("{}: {error}", manifest_path.display())))?;
         let mut templates = Vec::new();
         let mut anchor_index = None;
+        let mut template_paths = Vec::new();
 
         for (line_index, line) in manifest.lines().enumerate() {
             let line = line.trim();
@@ -98,17 +103,25 @@ impl Atlas {
                     )));
                 }
             };
+            if !is_label_symbol(symbol) || symbol == '?' {
+                return Err(invalid_data(format!(
+                    "{}:{}: unsupported tile symbol {symbol:?}",
+                    manifest_path.display(),
+                    line_index + 1
+                )));
+            }
             let template_path = directory.join(filename);
-            let image = image::open(&template_path)?.to_rgba8();
+            let image = load_png(&template_path)?;
             require_tile_size(&image, &template_path)?;
             if is_anchor && anchor_index.replace(templates.len()).is_some() {
                 return Err(invalid_data("atlas contains more than one anchor template"));
             }
             templates.push(Template {
                 symbol,
-                name: filename.to_owned(),
+                name: template_path.display().to_string(),
                 image,
             });
+            template_paths.push(template_path);
         }
 
         if templates.is_empty() {
@@ -119,7 +132,13 @@ impl Atlas {
         Ok(Self {
             templates,
             anchor_index,
+            template_paths,
         })
+    }
+
+    /// Files referenced by the atlas, including templates outside its directory.
+    pub fn template_paths(&self) -> &[PathBuf] {
+        &self.template_paths
     }
 
     pub fn anchor_name(&self) -> &str {
@@ -130,17 +149,48 @@ impl Atlas {
         &self.templates[self.anchor_index].image
     }
 
-    fn classify(&self, tile: &RgbaImage) -> Option<char> {
-        self.templates
+    fn classify(&self, tile: &RgbaImage) -> Result<Option<char>, String> {
+        let matches = self
+            .templates
             .iter()
-            .find(|template| template.image.as_raw() == tile.as_raw())
-            .map(|template| template.symbol)
+            .filter(|template| template.image.as_raw() == tile.as_raw())
+            .collect::<Vec<_>>();
+        let void = is_void(tile);
+        let Some(first) = matches.first() else {
+            return Ok(void.then_some(' '));
+        };
+        if matches
+            .iter()
+            .any(|template| template.symbol != first.symbol)
+            || (void && first.symbol != ' ')
+        {
+            let mut sources = matches
+                .iter()
+                .map(|template| format!("{:?} from {}", template.symbol, template.name))
+                .collect::<Vec<_>>();
+            if void {
+                sources.push("' ' from the black-background rule".to_owned());
+            }
+            return Err(format!("conflicting labels: {}", sources.join("; ")));
+        }
+        Ok(Some(first.symbol))
     }
 
     pub fn learn_labeled_level(
         &mut self,
         image: &RgbaImage,
         labels: &str,
+    ) -> Result<TrainingSummary, Box<dyn Error>> {
+        self.learn_labeled_level_from(image, labels, "<labels>")
+    }
+
+    /// Learn authoritative examples, retaining their source for conflict reports.
+    /// Validation and placement finish before any examples are added.
+    pub fn learn_labeled_level_from(
+        &mut self,
+        image: &RgbaImage,
+        labels: &str,
+        source: &str,
     ) -> Result<TrainingSummary, Box<dyn Error>> {
         let rows = labeled_rows(labels)?;
         let target_width = rows.iter().map(Vec::len).max().unwrap_or(0);
@@ -217,16 +267,12 @@ impl Atlas {
                     TILE_SIZE,
                 )
                 .to_image();
-                if let Some(template) = self
-                    .templates
-                    .iter_mut()
-                    .find(|template| template.image.as_raw() == tile.as_raw())
-                {
-                    template.symbol = symbol;
-                } else {
+                if !self.templates.iter().any(|template| {
+                    template.image.as_raw() == tile.as_raw() && template.symbol == symbol
+                }) {
                     self.templates.push(Template {
                         symbol,
-                        name: format!("learned-{x}-{y}"),
+                        name: format!("{source} at ({x}, {y})"),
                         image: tile,
                     });
                     learned_variants += 1;
@@ -244,7 +290,9 @@ impl Atlas {
 }
 
 pub fn load_png(path: &Path) -> Result<RgbaImage, Box<dyn Error>> {
-    Ok(image::open(path)?.to_rgba8())
+    image::open(path)
+        .map(|image| image.to_rgba8())
+        .map_err(|error| invalid_data(format!("{}: {error}", path.display())))
 }
 
 pub fn import_level(image: &RgbaImage, atlas: &Atlas) -> Result<ImportedLevel, Box<dyn Error>> {
@@ -258,11 +306,13 @@ pub fn import_level(image: &RgbaImage, atlas: &Atlas) -> Result<ImportedLevel, B
         let mut row = Vec::new();
         for (grid_x, &pixel_x) in xs.iter().enumerate() {
             let tile = imageops::crop_imm(image, pixel_x, pixel_y, TILE_SIZE, TILE_SIZE).to_image();
-            let symbol = if is_void(&tile) {
-                ' '
-            } else if let Some(symbol) = atlas.classify(&tile) {
+            let classification = atlas.classify(&tile);
+            let symbol = if let Ok(Some(symbol)) = classification {
                 symbol
             } else {
+                let reason = classification
+                    .err()
+                    .unwrap_or_else(|| "unrecognized tile".to_owned());
                 let hash = tile_hash(&tile);
                 unknown
                     .entry(hash)
@@ -270,6 +320,7 @@ pub fn import_level(image: &RgbaImage, atlas: &Atlas) -> Result<ImportedLevel, B
                         hash,
                         image: tile.clone(),
                         positions: Vec::new(),
+                        reason,
                     })
                     .positions
                     .push((grid_x, grid_y));
@@ -347,12 +398,24 @@ pub fn detect_grid_phase(
     if best.anchor_matches == 0 {
         return Err(invalid_data("anchor tile was not found in screenshot"));
     }
+    let ties = counts
+        .iter()
+        .flatten()
+        .filter(|&&count| count == best.anchor_matches)
+        .count();
+    if ties > 1 {
+        return Err(invalid_data(format!(
+            "ambiguous grid alignment: {ties} phases tied with {} anchor matches",
+            best.anchor_matches
+        )));
+    }
     Ok(best)
 }
 
 pub fn png_files(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut paths: Vec<_> = fs::read_dir(directory)?
-        .filter_map(Result::ok)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|extension| extension == "png"))
         .collect();
@@ -366,7 +429,7 @@ pub fn save_unknown_tiles(
     tiles: &[UnknownTile],
 ) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(directory)?;
-    let mut index = String::from("hash\tfile\tpositions\n");
+    let mut index = String::from("hash\tfile\tpositions\treason\n");
     for tile in tiles {
         let filename = format!("{:016x}.png", tile.hash);
         tile.image.save(directory.join(&filename))?;
@@ -376,7 +439,11 @@ pub fn save_unknown_tiles(
             .map(|(x, y)| format!("{x},{y}"))
             .collect::<Vec<_>>()
             .join(" ");
-        index.push_str(&format!("{:016x}\t{filename}\t{positions}\n", tile.hash));
+        index.push_str(&format!(
+            "{:016x}\t{filename}\t{positions}\t{}\n",
+            tile.hash,
+            tile.reason.replace(['\t', '\n', '\r'], " ")
+        ));
     }
     fs::write(directory.join(format!("{level_name}.tsv")), index)?;
     Ok(())
@@ -397,7 +464,23 @@ fn labeled_rows(labels: &str) -> Result<Vec<Vec<char>>, Box<dyn Error>> {
     if rows.is_empty() || rows.iter().all(Vec::is_empty) {
         return Err(invalid_data("labeled map is empty"));
     }
+    for (y, row) in rows.iter().enumerate() {
+        for (x, &symbol) in row.iter().enumerate() {
+            if !is_label_symbol(symbol) {
+                return Err(invalid_data(format!(
+                    "unsupported tile symbol {symbol:?} at ({x}, {y})"
+                )));
+            }
+        }
+    }
     Ok(rows)
+}
+
+fn is_label_symbol(symbol: char) -> bool {
+    matches!(
+        symbol,
+        ' ' | '#' | 'D' | 'P' | 'G' | 'S' | 't' | '?' | 'C' | 'O' | '@'
+    )
 }
 
 fn is_void(tile: &RgbaImage) -> bool {
@@ -511,35 +594,134 @@ mod tests {
     }
 
     #[test]
-    fn reproduces_all_authoritative_levels() {
-        let mut atlas = Atlas::load(Path::new("data/tile-templates")).unwrap();
-        let fixtures = [
-            (
-                "data/level-screenshots/1.png",
-                "data/level-manual-labels/1.txt",
-            ),
-            (
-                "data/level-screenshots/2.png",
-                "data/level-manual-labels/2.txt",
-            ),
-        ];
+    fn rejects_tied_grid_phases_and_missing_anchors() {
+        let anchor = test_tile(1);
+        let mut screenshot = RgbaImage::new(32, 16);
+        imageops::replace(&mut screenshot, &anchor, 0, 0);
+        imageops::replace(&mut screenshot, &anchor, 17, 8);
+        assert!(
+            detect_grid_phase(&screenshot, &anchor)
+                .unwrap_err()
+                .to_string()
+                .contains("2 phases tied")
+        );
+        assert!(detect_grid_phase(&RgbaImage::new(16, 16), &anchor).is_err());
+    }
 
-        for (screenshot_path, labels_path) in fixtures {
-            let screenshot = load_png(Path::new(screenshot_path)).unwrap();
-            let labels = fs::read_to_string(labels_path).unwrap();
-            atlas.learn_labeled_level(&screenshot, &labels).unwrap();
+    fn test_tile(seed: u8) -> RgbaImage {
+        RgbaImage::from_fn(TILE_SIZE, TILE_SIZE, |x, y| {
+            Rgba([seed, x as u8 + 1, y as u8 + 1, 255])
+        })
+    }
+
+    fn test_atlas() -> Atlas {
+        Atlas {
+            templates: ['#', '@', 'G']
+                .into_iter()
+                .enumerate()
+                .map(|(index, symbol)| Template {
+                    symbol,
+                    name: format!("{symbol}.png"),
+                    image: test_tile(index as u8 + 1),
+                })
+                .collect(),
+            anchor_index: 0,
+            template_paths: Vec::new(),
         }
+    }
 
-        for (screenshot_path, labels_path) in fixtures {
-            let screenshot = load_png(Path::new(screenshot_path)).unwrap();
-            let labels = fs::read_to_string(labels_path).unwrap();
+    fn test_screenshot() -> RgbaImage {
+        let mut screenshot = RgbaImage::new(32, 8);
+        for i in 0..4 {
+            imageops::replace(&mut screenshot, &test_tile(i + 1), i64::from(i) * 8, 0);
+        }
+        screenshot
+    }
+
+    #[test]
+    fn teaching_one_new_pattern_resolves_all_its_occurrences() {
+        let mut atlas = test_atlas();
+        let screenshot = test_screenshot();
+        let mut repeated = RgbaImage::new(48, 8);
+        imageops::replace(&mut repeated, &screenshot, 8, 0);
+        imageops::replace(&mut repeated, &test_tile(4), 40, 0);
+        let imported = import_level(&repeated, &atlas).unwrap();
+        assert_eq!(imported.map, "#@G??");
+        assert_eq!(imported.unknown_tiles.len(), 1);
+        assert_eq!(imported.unknown_tiles[0].positions, [(3, 0), (4, 0)]);
+        atlas
+            .learn_labeled_level_from(&screenshot, "#@Gt", "example.txt")
+            .unwrap();
+        let imported = import_level(&repeated, &atlas).unwrap();
+        assert_eq!(imported.map, "#@Gtt");
+        assert!(imported.unknown_tiles.is_empty());
+    }
+
+    #[test]
+    fn conflicting_examples_are_unresolved_regardless_of_training_order() {
+        let screenshot = test_screenshot();
+        for examples in [
+            [("#@Gt", "torch.txt"), ("#@GS", "skull.txt")],
+            [("#@GS", "skull.txt"), ("#@Gt", "torch.txt")],
+        ] {
+            let mut atlas = test_atlas();
+            for (labels, source) in examples {
+                atlas
+                    .learn_labeled_level_from(&screenshot, labels, source)
+                    .unwrap();
+            }
             let imported = import_level(&screenshot, &atlas).unwrap();
-
-            assert_eq!(imported.map, labels.trim_end(), "fixture {labels_path}");
-            assert!(
-                imported.unknown_tiles.is_empty(),
-                "fixture {labels_path} still has unknown tiles"
-            );
+            assert_eq!(imported.map, "#@G?");
+            let tile = &imported.unknown_tiles[0];
+            assert_eq!(tile.positions, [(3, 0)]);
+            assert!(tile.reason.contains("conflicting labels"));
+            assert!(tile.reason.contains("torch.txt at (3, 0)"));
+            assert!(tile.reason.contains("skull.txt at (3, 0)"));
         }
+    }
+
+    #[test]
+    fn manual_labels_cannot_silently_override_the_atlas_or_black_background() {
+        let mut atlas = test_atlas();
+        let mut screenshot = test_screenshot();
+        imageops::replace(&mut screenshot, &RgbaImage::new(8, 8), 24, 0);
+        atlas
+            .learn_labeled_level_from(&screenshot, "#CGt", "wrong.txt")
+            .unwrap();
+        let imported = import_level(&screenshot, &atlas).unwrap();
+        assert_eq!(imported.map, "#?G?");
+        assert_eq!(imported.unknown_tiles.len(), 2);
+        assert!(
+            imported
+                .unknown_tiles
+                .iter()
+                .any(|tile| tile.reason.contains("black-background"))
+        );
+        assert!(
+            imported
+                .unknown_tiles
+                .iter()
+                .any(|tile| tile.reason.contains("@.png"))
+        );
+    }
+
+    #[test]
+    fn invalid_or_unplaceable_labels_do_not_partially_train_the_atlas() {
+        let mut atlas = test_atlas();
+        let screenshot = test_screenshot();
+        for labels in ["#CG!", "#@Gtt", "@Gt"] {
+            assert!(atlas.learn_labeled_level(&screenshot, labels).is_err());
+            assert_eq!(import_level(&screenshot, &atlas).unwrap().map, "#@G?");
+        }
+        let mut repeated = RgbaImage::new(40, 8);
+        imageops::replace(&mut repeated, &screenshot, 0, 0);
+        imageops::replace(&mut repeated, &test_tile(1), 32, 0);
+        assert!(
+            atlas
+                .learn_labeled_level(&repeated, "#")
+                .unwrap_err()
+                .to_string()
+                .contains("placements tied")
+        );
     }
 }

@@ -2,13 +2,13 @@ use magicube_solver::GameInput::{Jump, Left, Right, Shoot, Wait};
 use magicube_solver::{GameState, GameStatus, Position, Tile};
 
 #[test]
-fn projectiles_pass_through_goals_on_either_substep() {
-    for row in ["#@G    #", "#@ G   #"] {
+fn projectiles_pass_through_goals_on_every_substep() {
+    for row in ["#@G    #", "#@ G   #", "#@  G  #"] {
         let initial = GameState::from_ascii(&format!("########\n{row}\n########")).unwrap();
-        let fired = initial.step(Shoot).step(Right);
+        let fired = initial.step(Shoot).step(Right).step(Wait);
         assert_eq!(
             fired.projectile().unwrap().position,
-            Position { x: 3, y: 1 }
+            Position { x: 4, y: 1 }
         );
         assert!(fired.cubes().is_empty());
         assert_eq!(fired.status(), GameStatus::Playing);
@@ -20,7 +20,7 @@ fn spawning_the_player_cube_on_a_goal_wins_and_stops_play() {
     let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
     let goal = Position { x: 2, y: 1 };
     assert!(!initial.is_solid(goal));
-    let won = initial.step(Shoot).step(Right);
+    let won = initial.step(Shoot).step(Right).step(Wait);
     assert_eq!(won.status(), GameStatus::Won);
     assert_eq!(won.cubes()[0].position, goal);
     assert_eq!(won.level().tile_at(goal), Tile::Goal);

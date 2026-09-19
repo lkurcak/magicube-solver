@@ -41,6 +41,12 @@ struct RecordedSettings {
     allow_airborne_shooting: bool,
     // Absent in version 2; new records always write an explicit boolean.
     allow_airborne_pushing: Option<bool>,
+    // Absent before version 4, when projectile speed was fixed at two.
+    projectile_tiles_per_update: Option<usize>,
+    // Absent before version 5, when recovery was fixed at one update.
+    shot_recovery_updates: Option<usize>,
+    // Absent before version 5, when projectiles moved during the firing update.
+    projectile_moves_on_firing_update: Option<bool>,
 }
 
 impl From<GameSettings> for RecordedSettings {
@@ -48,6 +54,9 @@ impl From<GameSettings> for RecordedSettings {
         Self {
             allow_airborne_shooting: settings.allow_airborne_shooting,
             allow_airborne_pushing: Some(settings.allow_airborne_pushing),
+            projectile_tiles_per_update: Some(settings.projectile_tiles_per_update),
+            shot_recovery_updates: Some(settings.shot_recovery_updates),
+            projectile_moves_on_firing_update: Some(settings.projectile_moves_on_firing_update),
         }
     }
 }
@@ -59,8 +68,11 @@ impl RecordedSolution {
             1 => Ok(GameSettings {
                 allow_airborne_shooting: true,
                 allow_airborne_pushing: true,
+                projectile_tiles_per_update: 2,
+                shot_recovery_updates: 1,
+                projectile_moves_on_firing_update: true,
             }),
-            2 | 3 => {
+            2..=5 => {
                 let settings = self.settings.ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -78,14 +90,50 @@ impl RecordedSolution {
                         )
                     })?
                 };
+                let projectile_tiles_per_update = if self.format_version < 4 {
+                    2
+                } else {
+                    settings.projectile_tiles_per_update.ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "solution format 4 requires settings.projectile_tiles_per_update",
+                        )
+                    })?
+                };
+                let (shot_recovery_updates, projectile_moves_on_firing_update) = if self
+                    .format_version
+                    < 5
+                {
+                    (1, true)
+                } else {
+                    (
+                            settings.shot_recovery_updates.ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "solution format 5 requires settings.shot_recovery_updates",
+                                )
+                            })?,
+                            settings.projectile_moves_on_firing_update.ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "solution format 5 requires settings.projectile_moves_on_firing_update",
+                                )
+                            })?,
+                        )
+                };
                 Ok(GameSettings {
                     allow_airborne_shooting: settings.allow_airborne_shooting,
                     allow_airborne_pushing,
+                    projectile_tiles_per_update,
+                    shot_recovery_updates,
+                    projectile_moves_on_firing_update,
                 })
             }
             version => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("unsupported solution format version {version} (expected 1, 2 or 3)"),
+                format!(
+                    "unsupported solution format version {version} (expected 1, 2, 3, 4, or 5)"
+                ),
             )),
         }
     }
@@ -236,7 +284,7 @@ pub fn save(
     // Resolve lazily: an unavailable data directory must not prevent playing.
     let directory = directory(directory_override)?;
     let solution = Solution {
-        format_version: 3,
+        format_version: 5,
         game_version: env!("CARGO_PKG_VERSION"),
         settings: app.state.settings().into(),
         level: SavedLevel {
@@ -324,7 +372,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let map = "#######\n#     #\n#@ G###\n#######\n";
+        let map = "########\n#      #\n#@  G###\n########\n";
         let mut app = App::new(GameState::from_ascii(map).unwrap());
         for input in [GameInput::Jump, GameInput::Right, GameInput::Wait] {
             app.apply(Command::Step(input));
@@ -340,20 +388,28 @@ mod tests {
         ] {
             app.apply(Command::Step(input));
         }
-        app.advance_recovery();
+        while app.is_recovering() {
+            app.advance_recovery();
+        }
         assert_eq!(app.state.status(), GameStatus::Won);
         let before = app.state.clone();
         let first = save(&app, "../level 1.txt", map, Some(&directory)).unwrap();
         let bytes = fs::read(&first).unwrap();
         let saved: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(saved["format_version"], 3);
+        assert_eq!(saved["format_version"], 5);
         assert_eq!(saved["settings"]["allow_airborne_shooting"], false);
         assert_eq!(saved["settings"]["allow_airborne_pushing"], false);
+        assert_eq!(saved["settings"]["projectile_tiles_per_update"], 3);
+        assert_eq!(saved["settings"]["shot_recovery_updates"], 2);
+        assert_eq!(
+            saved["settings"]["projectile_moves_on_firing_update"],
+            false
+        );
         assert_eq!(saved["status"], "won");
         assert_eq!(saved["level"]["map"], map);
         assert_eq!(
             saved["inputs"],
-            serde_json::json!(["shoot", "shoot", "shoot", "right", "wait"])
+            serde_json::json!(["shoot", "shoot", "shoot", "right", "wait", "wait"])
         );
         let mut replay = GameState::from_ascii(saved["level"]["map"].as_str().unwrap()).unwrap();
         for input in saved["inputs"].as_array().unwrap() {
@@ -373,7 +429,7 @@ mod tests {
         let (name, mut loaded) = load(&first).unwrap();
         assert_eq!(name, "../level 1.txt");
         assert_eq!(loaded.position(), 0);
-        assert_eq!(loaded.len(), 5);
+        assert_eq!(loaded.len(), 6);
         loaded.apply(crate::replay::Command::End, std::time::Instant::now());
         assert_eq!(loaded.state(), &app.state);
         loaded.apply(crate::replay::Command::Back(1), std::time::Instant::now());
@@ -399,8 +455,12 @@ mod tests {
 
     fn record(map: &str, inputs: &[&str], status: &str) -> Value {
         serde_json::json!({
-            "format_version": 3,
-            "settings": {"allow_airborne_shooting": false, "allow_airborne_pushing": false},
+            "format_version": 4,
+            "settings": {
+                "allow_airborne_shooting": false,
+                "allow_airborne_pushing": false,
+                "projectile_tiles_per_update": 3
+            },
             "game_version": "0.1.0",
             "level": {"name": "recorded level", "map": map},
             "status": status,
@@ -408,9 +468,17 @@ mod tests {
         })
     }
 
+    fn current_record(map: &str, inputs: &[&str], status: &str) -> Value {
+        let mut record = record(map, inputs, status);
+        record["format_version"] = 5.into();
+        record["settings"]["shot_recovery_updates"] = 2.into();
+        record["settings"]["projectile_moves_on_firing_update"] = false.into();
+        record
+    }
+
     #[test]
     fn loads_empty_partial_aiming_recovering_winning_and_game_over_attempts() {
-        let map = "#######\n#     #\n#@ G###\n#######";
+        let map = "########\n#      #\n#@  G###\n########";
         for (inputs, status) in [
             (vec![], "in_progress"),
             (vec!["shoot"], "in_progress"),
@@ -420,7 +488,18 @@ mod tests {
             let (_, replay) =
                 decode(&serde_json::to_vec(&record(map, &inputs, status)).unwrap()).unwrap();
             assert_eq!(replay.len(), inputs.len());
-            assert_eq!(replay.state(), &GameState::from_ascii(map).unwrap());
+            assert_eq!(
+                replay.state(),
+                &GameState::from_ascii_with_settings(
+                    map,
+                    GameSettings {
+                        shot_recovery_updates: 1,
+                        projectile_moves_on_firing_update: true,
+                        ..GameSettings::default()
+                    }
+                )
+                .unwrap()
+            );
         }
         let death = record("#####\n# C #\n# @ #\n#####", &["wait"], "game_over");
         let (_, replay) = decode(&serde_json::to_vec(&death).unwrap()).unwrap();
@@ -429,7 +508,7 @@ mod tests {
 
     #[test]
     fn rejects_corrupt_unsupported_or_inconsistent_records() {
-        let valid = record("#####\n#@G##\n#####", &["shoot", "right"], "won");
+        let valid = current_record("#####\n#@G##\n#####", &["shoot", "right", "wait"], "won");
         let mut cases = Vec::new();
         let mut version = valid.clone();
         version["format_version"] = 99.into();
@@ -452,6 +531,27 @@ mod tests {
             }
             cases.push((incomplete, "requires settings.allow_airborne_pushing"));
         }
+        let mut incomplete = valid.clone();
+        incomplete["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("projectile_tiles_per_update");
+        cases.push((incomplete, "requires settings.projectile_tiles_per_update"));
+        let mut incomplete = valid.clone();
+        incomplete["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("shot_recovery_updates");
+        cases.push((incomplete, "requires settings.shot_recovery_updates"));
+        let mut incomplete = valid.clone();
+        incomplete["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("projectile_moves_on_firing_update");
+        cases.push((
+            incomplete,
+            "requires settings.projectile_moves_on_firing_update",
+        ));
         let mut old_no_settings = valid.clone();
         old_no_settings["format_version"] = 2.into();
         old_no_settings.as_object_mut().unwrap().remove("settings");
@@ -510,7 +610,7 @@ mod tests {
     #[test]
     fn recorded_pushing_rules_and_legacy_versions_reproduce_airborne_pushes() {
         let map = "#######\n#@OG###\n# ### #\n#######";
-        for version in [1, 2, 3] {
+        for version in [1, 2, 3, 4] {
             for allow_airborne_pushing in [false, true] {
                 let mut saved = record(map, &["right"], "won");
                 saved["format_version"] = version.into();
@@ -524,9 +624,10 @@ mod tests {
                             .unwrap()
                             .remove("allow_airborne_pushing");
                     }
-                    _ => {
+                    3 | 4 => {
                         saved["settings"]["allow_airborne_pushing"] = allow_airborne_pushing.into();
                     }
+                    _ => unreachable!(),
                 }
                 let can_push = version < 3 || allow_airborne_pushing;
                 if !can_push {
@@ -562,13 +663,14 @@ mod tests {
                 let settings = GameSettings {
                     allow_airborne_shooting,
                     allow_airborne_pushing,
+                    ..GameSettings::default()
                 };
                 let initial = GameState::from_ascii_with_settings(map, settings).unwrap();
                 let mut app = App::new(initial.clone());
                 app.apply(Command::Step(GameInput::Right));
                 let path = save(&app, "push", map, Some(&directory)).unwrap();
                 let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-                assert_eq!(saved["format_version"], 3);
+                assert_eq!(saved["format_version"], 5);
                 assert_eq!(
                     saved["settings"]["allow_airborne_shooting"],
                     allow_airborne_shooting
@@ -613,6 +715,7 @@ mod tests {
             map,
             GameSettings {
                 allow_airborne_shooting: true,
+                projectile_tiles_per_update: 4,
                 ..GameSettings::default()
             },
         )
@@ -621,10 +724,14 @@ mod tests {
         for input in [GameInput::Jump, GameInput::Shoot, GameInput::Right] {
             app.apply(Command::Step(input));
         }
+        while app.is_recovering() {
+            app.advance_recovery();
+        }
         assert_eq!(app.state.status(), GameStatus::Won);
         let path = save(&app, "fun", map, Some(&directory)).unwrap();
         let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(saved["settings"]["allow_airborne_shooting"], true);
+        assert_eq!(saved["settings"]["projectile_tiles_per_update"], 4);
         let (_, replay) = load(&path).unwrap();
         assert_eq!(replay.state(), &initial);
         assert_eq!(replay.final_state(), &app.state);

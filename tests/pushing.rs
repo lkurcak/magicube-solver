@@ -62,6 +62,7 @@ fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
                     GameSettings {
                         allow_airborne_shooting,
                         allow_airborne_pushing,
+                        ..GameSettings::default()
                     },
                 )
                 .unwrap();
