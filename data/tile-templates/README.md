@@ -4,11 +4,17 @@
 may map to the same character because sprites can animate or overdraw neighboring
 cells. The special character `_` represents a space (semantic void).
 
+Exact template matches take priority. Otherwise, the importer tolerates particles
+or similar screenshot noise by accepting the uniquely nearest template when at
+most three of the crop's 64 RGB pixels differ. Black background participates as
+a space template. Larger differences and equal-distance matches for different
+characters remain unresolved and are reported as `?`.
+
 Exactly one template must start with `anchor`. The importer searches for exact
 copies of that distinctive tile to find the grid alignment of every screenshot.
 
 Running `cargo run --bin screenshots-to-maps` exports unresolved tile crops to
-`data/levels/unknown-tiles/` and diagnostics to `data/levels/import-report.txt`.
+`cache/levels/unknown-tiles/` and diagnostics to `cache/levels/import-report.txt`.
 Each level's TSV index lists crop filenames, zero-based map coordinates, and the
 reason recognition failed. To teach the importer a
 new tile, add an authoritative manual crop to `data/tiles-manual/` and reference

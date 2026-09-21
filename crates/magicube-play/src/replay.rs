@@ -92,6 +92,10 @@ impl Replay {
         self.inputs.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inputs.is_empty()
+    }
+
     pub fn last_input(&self) -> Option<GameInput> {
         self.position.checked_sub(1).map(|index| self.inputs[index])
     }

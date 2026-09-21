@@ -79,6 +79,17 @@ pub struct SolveResult {
 /// assert_eq!(won.status(), GameStatus::Won);
 /// ```
 pub fn solve(initial: &GameState, options: SolveOptions) -> SolveResult {
+    solve_with_progress(initial, options, |_| {})
+}
+
+/// Equivalent to [`solve`], with periodic search statistics for user interfaces.
+/// The callback runs after the first expansion and then every 10,000 expanded
+/// states. It must return quickly because the search remains single-threaded.
+pub fn solve_with_progress(
+    initial: &GameState,
+    options: SolveOptions,
+    mut progress: impl FnMut(SolveStats),
+) -> SolveResult {
     let mut stats = SolveStats::default();
     let immediate = match initial.status() {
         GameStatus::Won => Some(SolveOutcome::Solved(Vec::new())),
@@ -105,6 +116,9 @@ pub fn solve(initial: &GameState, options: SolveOptions) -> SolveResult {
     while cursor < nodes.len() {
         let state = Rc::clone(&nodes[cursor].state);
         stats.expanded_states += 1;
+        if stats.expanded_states == 1 || stats.expanded_states.is_multiple_of(10_000) {
+            progress(stats);
+        }
         let inputs: &[GameInput] = match state.0.player().mode {
             PlayerMode::Normal => &[
                 GameInput::Left,

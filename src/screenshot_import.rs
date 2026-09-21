@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub const TILE_SIZE: u32 = 8;
+const MAX_NOISE_PIXELS: usize = 3;
 
 #[derive(Debug)]
 pub struct Atlas {
@@ -156,13 +157,11 @@ impl Atlas {
             .filter(|template| template.image.as_raw() == tile.as_raw())
             .collect::<Vec<_>>();
         let void = is_void(tile);
-        let Some(first) = matches.first() else {
-            return Ok(void.then_some(' '));
-        };
-        if matches
-            .iter()
-            .any(|template| template.symbol != first.symbol)
-            || (void && first.symbol != ' ')
+        if let Some(first) = matches.first()
+            && (matches
+                .iter()
+                .any(|template| template.symbol != first.symbol)
+                || (void && first.symbol != ' '))
         {
             let mut sources = matches
                 .iter()
@@ -173,7 +172,51 @@ impl Atlas {
             }
             return Err(format!("conflicting labels: {}", sources.join("; ")));
         }
-        Ok(Some(first.symbol))
+        if let Some(first) = matches.first() {
+            return Ok(Some(first.symbol));
+        }
+        if void {
+            return Ok(Some(' '));
+        }
+
+        let mut nearest_distance = MAX_NOISE_PIXELS + 1;
+        let mut nearest = Vec::new();
+        for template in &self.templates {
+            let distance = pixel_distance(tile, &template.image, MAX_NOISE_PIXELS);
+            if distance < nearest_distance {
+                nearest_distance = distance;
+                nearest.clear();
+                nearest.push((template.symbol, template.name.as_str()));
+            } else if distance == nearest_distance {
+                nearest.push((template.symbol, template.name.as_str()));
+            }
+        }
+
+        let black_distance = non_black_pixel_count(tile, MAX_NOISE_PIXELS);
+        if black_distance < nearest_distance {
+            nearest_distance = black_distance;
+            nearest.clear();
+            nearest.push((' ', "the black-background rule"));
+        } else if black_distance == nearest_distance {
+            nearest.push((' ', "the black-background rule"));
+        }
+
+        if nearest_distance > MAX_NOISE_PIXELS {
+            return Ok(None);
+        }
+        let symbol = nearest[0].0;
+        if nearest.iter().all(|candidate| candidate.0 == symbol) {
+            return Ok(Some(symbol));
+        }
+
+        let sources = nearest
+            .into_iter()
+            .map(|(symbol, source)| format!("{symbol:?} from {source}"))
+            .collect::<Vec<_>>();
+        Err(format!(
+            "ambiguous noise-tolerant match at {nearest_distance} changed pixels: {}",
+            sources.join("; ")
+        ))
     }
 
     pub fn learn_labeled_level(
@@ -487,6 +530,32 @@ fn is_void(tile: &RgbaImage) -> bool {
     tile.pixels().all(|pixel| pixel.0[..3] == [0, 0, 0])
 }
 
+fn pixel_distance(left: &RgbaImage, right: &RgbaImage, limit: usize) -> usize {
+    let mut distance = 0;
+    for (left, right) in left.pixels().zip(right.pixels()) {
+        if left.0[..3] != right.0[..3] {
+            distance += 1;
+            if distance > limit {
+                break;
+            }
+        }
+    }
+    distance
+}
+
+fn non_black_pixel_count(tile: &RgbaImage, limit: usize) -> usize {
+    let mut count = 0;
+    for pixel in tile.pixels() {
+        if pixel.0[..3] != [0, 0, 0] {
+            count += 1;
+            if count > limit {
+                break;
+            }
+        }
+    }
+    count
+}
+
 fn tile_hash(tile: &RgbaImage) -> u64 {
     tile.as_raw().iter().fold(0xcbf29ce484222325, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
@@ -655,6 +724,79 @@ mod tests {
         let imported = import_level(&repeated, &atlas).unwrap();
         assert_eq!(imported.map, "#@Gtt");
         assert!(imported.unknown_tiles.is_empty());
+    }
+
+    #[test]
+    fn tolerates_up_to_three_noisy_pixels_on_any_tile() {
+        let atlas = test_atlas();
+        for template in &atlas.templates {
+            for noise_pixels in 1..=MAX_NOISE_PIXELS {
+                let mut tile = template.image.clone();
+                for x in 0..noise_pixels as u32 {
+                    tile.put_pixel(x, 0, Rgba([255, 0, 255, 255]));
+                }
+                assert_eq!(atlas.classify(&tile).unwrap(), Some(template.symbol));
+            }
+        }
+    }
+
+    #[test]
+    fn noisy_black_background_does_not_expand_the_level() {
+        let atlas = test_atlas();
+        let mut screenshot = RgbaImage::new(24, 16);
+        for x in 0..MAX_NOISE_PIXELS as u32 {
+            screenshot.put_pixel(x, 0, Rgba([255, 163, 0, 255]));
+        }
+        for (x, seed) in [1, 2, 3].into_iter().enumerate() {
+            imageops::replace(
+                &mut screenshot,
+                &test_tile(seed),
+                x as i64 * i64::from(TILE_SIZE),
+                i64::from(TILE_SIZE),
+            );
+        }
+
+        let imported = import_level(&screenshot, &atlas).unwrap();
+        assert_eq!(imported.map, "#@G");
+        assert_eq!((imported.width, imported.height), (3, 1));
+        assert!(imported.unknown_tiles.is_empty());
+    }
+
+    #[test]
+    fn rejects_excessive_or_ambiguous_pixel_differences() {
+        let atlas = test_atlas();
+        let mut screenshot = test_screenshot();
+        for x in 0..=MAX_NOISE_PIXELS as u32 {
+            screenshot.put_pixel(TILE_SIZE + x, 0, Rgba([255, 0, 255, 255]));
+        }
+        assert_eq!(import_level(&screenshot, &atlas).unwrap().map, "#?G?");
+
+        let base = RgbaImage::new(TILE_SIZE, TILE_SIZE);
+        let mut alternate = base.clone();
+        alternate.put_pixel(0, 0, Rgba([1, 0, 0, 0]));
+        alternate.put_pixel(1, 0, Rgba([1, 0, 0, 0]));
+        let ambiguous_atlas = Atlas {
+            templates: vec![
+                Template {
+                    symbol: '#',
+                    name: "wall.png".to_owned(),
+                    image: base,
+                },
+                Template {
+                    symbol: '@',
+                    name: "player.png".to_owned(),
+                    image: alternate,
+                },
+            ],
+            anchor_index: 0,
+            template_paths: Vec::new(),
+        };
+        let mut candidate = RgbaImage::new(TILE_SIZE, TILE_SIZE);
+        candidate.put_pixel(0, 0, Rgba([1, 0, 0, 0]));
+        let error = ambiguous_atlas.classify(&candidate).unwrap_err();
+        assert!(error.contains("ambiguous noise-tolerant match"));
+        assert!(error.contains("wall.png"));
+        assert!(error.contains("player.png"));
     }
 
     #[test]

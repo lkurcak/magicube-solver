@@ -1,10 +1,5 @@
-mod app;
 mod cli;
 mod level_select;
-mod render;
-mod replay;
-mod solutions;
-mod terminal;
 
 use std::env;
 use std::error::Error;
@@ -16,9 +11,10 @@ use std::time::Duration;
 use crossterm::event::{self, Event};
 use magicube_solver::{GameState, GameStatus};
 
-use app::{App, Command, Notification, RestartHold};
 use cli::Options;
-use terminal::TerminalSession;
+use magicube_play::app::{self, App, Command, Notification, RestartHold};
+use magicube_play::terminal::TerminalSession;
+use magicube_play::{render, replay, solutions};
 
 #[derive(Debug, Clone, Copy)]
 struct BundledLevel {

@@ -141,12 +141,24 @@ fn solves_bundled_level_7_with_no_longer_solution() {
     );
 }
 
-
 #[test]
 fn solves_bundled_level_18_with_no_longer_solution() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let catalog = magicube_solver::level_catalog::generate_catalog(
+        &root.join("data/level-screenshots"),
+        &root.join("data/level-manual-labels"),
+        &root.join("data/tile-templates"),
+    )
+    .unwrap();
+    let map = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.id == "18")
+        .and_then(|entry| entry.map())
+        .expect("level 18 should import cleanly");
     assert_solver_matches_saved_solution(
-         18,
-        include_str!("../data/levels/18.txt"),
-"right jump right right right right jump right shoot left wait right left left left left left jump left left right right left left shoot right wait jump right right jump right jump right shoot right wait left left right right right jump right right right right"
+        18,
+        map,
+        "right jump right right right right jump right shoot left wait right left left left left left jump left left right right left left shoot right wait jump right right jump right jump right shoot right wait left left right right right jump right right right right",
     );
 }

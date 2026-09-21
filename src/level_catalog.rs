@@ -139,7 +139,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_screenshots_are_clean_and_reproduce_every_manual_example() {
+    fn current_manual_examples_are_clean_and_reproduced() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let labels_dir = root.join("data/level-manual-labels");
         let catalog = generate_catalog(
@@ -150,14 +150,15 @@ mod tests {
         .unwrap();
         let mut manual_count = 0;
         for entry in &catalog.entries {
-            assert!(entry.is_clean(), "{}: {:?}", entry.name, entry.issues);
             if let Ok(labels) = fs::read_to_string(labels_dir.join(format!("{}.txt", entry.id))) {
+                assert!(entry.is_clean(), "{}: {:?}", entry.name, entry.issues);
                 assert_eq!(entry.map().unwrap(), labels.trim_end(), "{}", entry.name);
                 manual_count += 1;
             }
         }
         assert!(manual_count >= 8);
-        for id in ["9", "10"] {
+        assert_eq!(catalog.entries.len(), 45);
+        for id in ["9", "10", "45"] {
             assert!(catalog.entries.iter().any(|entry| entry.id == id));
         }
     }

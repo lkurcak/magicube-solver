@@ -23,3 +23,5 @@ edition.workspace = true
 [dependencies]
 image.workspace = true
 lk_math.workspace = true
+serde.workspace = true
+serde_json.workspace = true

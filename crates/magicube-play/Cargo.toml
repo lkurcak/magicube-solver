@@ -3,6 +3,7 @@ name = "magicube-play"
 version.workspace = true
 edition.workspace = true
 publish = false
+default-run = "magicube-play"
 
 [dependencies]
 crossterm.workspace = true

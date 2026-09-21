@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wra
 use ratatui::{Frame, Terminal};
 
 use crate::BundledLevel;
-use crate::{render, replay, solutions};
+use magicube_play::{render, replay, solutions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {

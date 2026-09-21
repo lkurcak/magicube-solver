@@ -12,7 +12,7 @@ edit is needed.
 
 ## Usage
 
-Export maps and repair diagnostics under the ignored `data/levels/` directory:
+Export maps and repair diagnostics under the ignored `cache/levels/` directory:
 
 ```sh
 cargo run --bin screenshots-to-maps
@@ -33,10 +33,30 @@ One bad screenshot does not prevent the other levels from being bundled. Broken
 shared atlas configuration fails the build.
 
 When a level is corrupted, run `screenshots-to-maps` and inspect
-`data/levels/import-report.txt` and `data/levels/unknown-tiles/`. Add a labeled
+`cache/levels/import-report.txt` and `cache/levels/unknown-tiles/`. Add a labeled
 template or a manual level example, then rebuild. The converter exports available
 maps even when some levels fail, and exits unsuccessfully if any entry is corrupted.
 It accepts optional `[screenshots-dir] [levels-dir] [atlas-dir] [labels-dir]` arguments.
+
+## Project progress dashboard
+
+`data/` contains only authored, trusted inputs. `data/level-manifest.txt` lists
+the expected level IDs; screenshots, manual maps, and tile templates beneath
+`data/` are ground truth. Everything persisted beneath the ignored `cache/`
+directory is reproducible and safe to delete.
+The former ignored `data/levels/` output is no longer read and can be removed.
+
+Run the one-stop progress dashboard in release mode so solver searches are fast:
+
+```sh
+cargo run --release -p magicube-play --bin magicube-progress
+```
+
+It rebuilds inferred maps and unknown-tile diagnostics, verifies cached solutions
+against the freshly imported maps and current game rules, and then solves clean
+unresolved levels one at a time. Failed searches are reused only for the same
+map, state limit, and compiled dashboard. Select a solved row and press Enter to
+open its replay. Deleting `cache/` makes the next run reconstruct everything.
 
 Print level 1 with the original prototype binary:
 

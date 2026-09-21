@@ -456,6 +456,8 @@ version = "0.1.0"
 dependencies = [
  "image",
  "lk_math",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
