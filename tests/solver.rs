@@ -53,16 +53,16 @@ fn tiny_solutions_are_shortest_and_replay_exactly() {
         (
             r#"
 ######
-#@OG #
-######
+#@O  #
+###G##
 "#,
             vec![Right],
         ),
         (
             r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#,
             vec![Shoot, Right],
         ),
@@ -70,16 +70,16 @@ fn tiny_solutions_are_shortest_and_replay_exactly() {
             r#"
 #######
 #     #
-#@ G###
-#######
+#@  ###
+###G###
 "#,
             vec![Shoot, Right],
         ),
         (
             r#"
 ######
-#  G##
-#@####
+#   ##
+#@#G##
 ######
 "#,
             vec![Jump, Right, Shoot, Right],
@@ -87,8 +87,8 @@ fn tiny_solutions_are_shortest_and_replay_exactly() {
         (
             r#"
 #########
-#DG P@  #
-#########
+#D   @  #
+##G#P####
 "#,
             vec![Left, Shoot, Left],
         ),
@@ -105,8 +105,8 @@ fn tiny_solutions_are_shortest_and_replay_exactly() {
 fn standard_search_shoots_only_when_grounded_and_fun_rules_are_explicit() {
     let map = r#"
 ######
-#  G##
-#@####
+#   ##
+#@#G##
 ######
 "#;
     let standard = game(map);
@@ -120,8 +120,8 @@ fn standard_search_shoots_only_when_grounded_and_fun_rules_are_explicit() {
     let fun = game_with_settings(
         r#"
 #####
-# G##
-#@###
+#  ##
+#@G##
 #####
 "#,
         GameSettings {
@@ -136,8 +136,8 @@ fn standard_search_shoots_only_when_grounded_and_fun_rules_are_explicit() {
 fn standard_search_cannot_push_in_midair_but_explicit_fun_rules_can() {
     let map = r#"
 #######
-#@OG###
-# ### #
+#@O ###
+# #G# #
 #######
 "#;
     let standard = game(map);
@@ -163,8 +163,8 @@ fn starts_while_aiming_or_recovering_and_wins_during_recovery() {
         r#"
 ########
 #      #
-#@  G###
-########
+#@   ###
+####G###
 "#,
     );
     let aiming = initial.step(Shoot);
@@ -177,8 +177,8 @@ fn starts_while_aiming_or_recovering_and_wins_during_recovery() {
     let blocked_aim = game(
         r#"
 ######
-#@OG #
-######
+#@O  #
+###G##
 "#,
     )
     .step(Shoot);
@@ -190,8 +190,8 @@ fn terminal_starts_need_no_search_even_with_a_zero_cap() {
     let won = game(
         r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#,
     )
     .step(Shoot)
@@ -226,8 +226,8 @@ fn exhausts_cycles_and_blocked_actions_in_a_finite_unsolvable_map() {
     let initial = game(
         r#"
 #####
-#@#G#
-#####
+#@# #
+###G#
 "#,
     );
     let result = solve(&initial, SolveOptions { max_states: None });
@@ -258,8 +258,8 @@ fn discards_fatal_successors_without_spending_the_state_budget_on_them() {
 #####
 ##C##
 ##@##
+## ##
 ##G##
-#####
 "#,
     );
     assert_eq!(initial.step(Wait).status(), GameStatus::GameOver);
@@ -281,8 +281,8 @@ fn state_caps_include_the_start_and_the_winning_state() {
     let initial = game(
         r#"
 ######
-#@OG #
-######
+#@O  #
+###G##
 "#,
     );
     for cap in [0, 1] {
@@ -328,8 +328,8 @@ fn open_maps_reach_the_limit_instead_of_claiming_unsolvability() {
 fn can_solve_from_above_the_map_without_clipping_coordinates() {
     let initial = game(
         r#"
-@OG
-###
+@O
+##G
 "#,
     )
     .step(Jump);

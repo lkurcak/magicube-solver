@@ -207,8 +207,8 @@ mod tests {
             r#"
 #######
 #     #
-#@ G###
-#######
+#@  ###
+###G###
 "#
             .trim_matches('\n'),
         )
@@ -282,8 +282,8 @@ mod tests {
         let initial = GameState::from_ascii(
             r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#
             .trim_matches('\n'),
         )
@@ -369,8 +369,8 @@ mod tests {
         let initial = GameState::from_ascii(
             r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#
             .trim_matches('\n'),
         )
@@ -394,8 +394,8 @@ mod tests {
         let unsolvable = GameState::from_ascii(
             r#"
 #####
-#@#G#
-#####
+#@# #
+###G#
 "#
             .trim_matches('\n'),
         )

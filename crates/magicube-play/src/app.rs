@@ -328,8 +328,8 @@ mod tests {
             (
                 r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#
                 .trim_matches('\n'),
                 GameStatus::Won,
@@ -338,8 +338,8 @@ mod tests {
             (
                 r#"
 ########
-#@  G###
-########
+#@   ###
+####G###
 "#
                 .trim_matches('\n'),
                 GameStatus::Won,
@@ -393,8 +393,8 @@ mod tests {
             (
                 r#"
 ######
-#@OG #
-######
+#@O  #
+###G##
 "#
                 .trim_matches('\n'),
                 GameInput::Right,

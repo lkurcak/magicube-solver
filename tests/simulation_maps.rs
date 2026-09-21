@@ -38,29 +38,36 @@ fn short_rows_are_empty_and_crlf_line_endings_are_accepted() {
 }
 
 #[test]
-fn gate_goals_round_trip_and_expose_both_capabilities() {
+fn gates_above_pedestals_round_trip_and_expose_both_capabilities() {
     let game = GameState::from_ascii(&level(
         r#"
 #####
-#@X #
-#####
+#@D #
+##G##
 "#,
     ))
     .unwrap();
     let position = Position { x: 2, y: 1 };
     let tile = game.level().tile_at(position);
 
-    assert_eq!(tile, Tile::GateGoal);
+    assert_eq!(tile, Tile::Gate);
     assert!(tile.is_gate());
-    assert!(tile.is_goal());
+    assert!(game.level().is_goal(position));
     assert_level_eq(
         &game.to_ascii(),
         r#"
 #####
-#@X #
-#####
+#@D #
+##G##
 "#,
     );
+}
+
+#[test]
+fn a_top_row_pedestal_has_a_goal_position_above_the_map() {
+    let game = GameState::from_ascii("@G\n##").unwrap();
+    assert!(game.level().is_goal(Position { x: 1, y: -1 }));
+    assert!(!game.level().is_goal(Position { x: 1, y: 0 }));
 }
 
 #[test]
@@ -95,6 +102,17 @@ fn rejects_empty_maps_missing_or_multiple_players_and_invalid_symbols() {
             ParseLevelError::InvalidTile {
                 position: Position { x: 1, y: 0 },
                 symbol: '!',
+            },
+        ),
+        (
+            level(
+                r#"
+@X
+"#,
+            ),
+            ParseLevelError::InvalidTile {
+                position: Position { x: 1, y: 0 },
+                symbol: 'X',
             },
         ),
     ] {

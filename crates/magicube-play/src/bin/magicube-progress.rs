@@ -478,8 +478,8 @@ mod tests {
             map: clean.then(|| {
                 r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#
                 .trim_matches('\n')
                 .to_owned()

@@ -129,7 +129,7 @@ fn validate_map(map: &str) -> Vec<String> {
         Ok(game) => game.level().has_goal(),
         Err(error) => {
             issues.push(format!("invalid game map: {error}"));
-            map.chars().any(|symbol| matches!(symbol, 'G' | 'X'))
+            map.chars().any(|symbol| symbol == 'G')
         }
     };
     if !has_goal {
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn validates_simulator_requirements_and_goal_presence() {
-        for map in ["#@G#", "#@X#"] {
+        for map in ["#@ #\n##G#", "#@D#\n##G#"] {
             assert!(validate_map(map).is_empty(), "{map:?}");
         }
         for map in ["", "#G#", "#@@G#", "#@OOG#", "#@!G#", "#@#"] {
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn gate_and_goal_template_repairs_level_15() {
+    fn gate_above_pedestal_repairs_level_15() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let catalog = generate_catalog(
             &root.join("data/level-screenshots"),
@@ -193,9 +193,30 @@ mod tests {
             .unwrap();
 
         assert!(level.is_clean(), "{:?}", level.issues);
-        assert_eq!(
-            level.map().unwrap().lines().nth(2).unwrap().chars().nth(15),
-            Some('X')
-        );
+        let map = level.map().unwrap().lines().collect::<Vec<_>>();
+        assert_eq!(map[2].chars().nth(15), Some('D'));
+        assert_eq!(map[3].chars().nth(15), Some('G'));
+    }
+
+    #[test]
+    fn occupied_pressure_plate_and_hidden_goal_import_level_20() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let catalog = generate_catalog(
+            &root.join("data/level-screenshots"),
+            &root.join("data/level-manual-labels"),
+            &root.join("data/tile-templates"),
+        )
+        .unwrap();
+        let level = catalog
+            .entries
+            .iter()
+            .find(|entry| entry.id == "20")
+            .unwrap();
+
+        assert!(level.is_clean(), "{:?}", level.issues);
+        let map = level.map().unwrap().lines().collect::<Vec<_>>();
+        assert_eq!(map[4].chars().nth(2), Some('C'));
+        assert_eq!(map[5].chars().nth(2), Some('P'));
+        assert!(level.map().unwrap().contains('G'));
     }
 }

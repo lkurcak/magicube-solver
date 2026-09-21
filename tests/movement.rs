@@ -275,31 +275,32 @@ fn blocked_jump_does_not_grant_airtime() {
 }
 
 #[test]
-fn non_wall_tiles_are_passable_and_preserved_under_the_player() {
+fn non_solid_tiles_and_derived_goals_are_passable_and_preserved() {
     let initial = game(
         r#"
 #######
-#@GSt?#
-#######
+#@ St?#
+##G####
 "#,
     );
     let mut current = initial;
-    for (x, tile) in [
-        (2, Tile::Goal),
-        (3, Tile::Skull),
-        (4, Tile::Torch),
-        (5, Tile::Unknown),
+    for (x, tile, is_goal) in [
+        (2, Tile::Empty, true),
+        (3, Tile::Skull, false),
+        (4, Tile::Torch, false),
+        (5, Tile::Unknown, false),
     ] {
         current = current.step(Right);
         assert_eq!(current.player().position, Position { x, y: 1 });
         assert_eq!(current.level().tile_at(current.player().position), tile);
+        assert_eq!(current.level().is_goal(current.player().position), is_goal);
     }
     assert_level_eq(
         &current.to_ascii(),
         r#"
 #######
-# GSt@#
-#######
+#  St@#
+##G####
 "#,
     );
     current = current.step(Left);
@@ -307,15 +308,15 @@ fn non_wall_tiles_are_passable_and_preserved_under_the_player() {
         &current.to_ascii(),
         r#"
 #######
-# GS@?#
-#######
+#  S@?#
+##G####
 "#,
     );
 }
 
 #[test]
 fn non_wall_tiles_do_not_supply_ground_support() {
-    for symbol in ['G', 'S', 't', '?'] {
+    for symbol in ['S', 't', '?'] {
         let initial = game(&format!(
             r#"
 #####
@@ -329,6 +330,23 @@ fn non_wall_tiles_do_not_supply_ground_support() {
         let landed = initial.step(Jump);
         assert_eq!(landed.player().position, Position { x: 2, y: 3 });
         assert!(landed.is_grounded());
+    }
+}
+
+#[test]
+fn feature_bases_are_solid_and_supply_ground_support() {
+    for symbol in ['G', 'P'] {
+        let initial = game(&format!(
+            r#"
+#####
+# @ #
+# {symbol} #
+#####
+"#
+        ));
+        let base = Position { x: 2, y: 2 };
+        assert!(initial.is_grounded());
+        assert!(initial.is_solid(base));
     }
 }
 

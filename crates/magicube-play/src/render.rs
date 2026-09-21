@@ -277,11 +277,9 @@ fn draw_board(
                 '#' => Color::Grey,
                 'D' if state.is_solid(position) => Color::White,
                 'D' => Color::DarkGrey,
-                'X' if state.is_solid(position) => Color::White,
-                'X' => Color::Green,
                 'P' => Color::Yellow,
                 'C' => Color::Blue,
-                'O' if level.tile_at(position).is_goal() => Color::Green,
+                'O' if level.is_goal(position) => Color::Green,
                 'O' => Color::Magenta,
                 '<' | '>' => Color::Yellow,
                 'G' => Color::Green,
@@ -376,8 +374,8 @@ mod tests {
             r#"
 ########
 #      #
-#@  G###
-########
+#@   ###
+####G###
 "#
             .trim_matches('\n'),
         )

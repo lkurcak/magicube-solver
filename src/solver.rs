@@ -73,8 +73,8 @@ pub struct SolveResult {
 /// let initial = GameState::from_ascii(
 ///     r#"
 /// #####
-/// #@G##
-/// #####
+/// #@ ##
+/// ##G##
 /// "#
 ///     .trim_matches('\n'),
 /// )

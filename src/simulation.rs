@@ -97,9 +97,8 @@ pub enum Tile {
     Empty,
     Wall,
     Gate,
-    GateGoal,
-    PressurePlate,
-    Goal,
+    PressurePlateBase,
+    Pedestal,
     Skull,
     Torch,
     Unknown,
@@ -108,12 +107,7 @@ pub enum Tile {
 impl Tile {
     /// Whether this tile follows the pressure-plate-controlled gate rules.
     pub const fn is_gate(self) -> bool {
-        matches!(self, Self::Gate | Self::GateGoal)
-    }
-
-    /// Whether the player's cube wins when it occupies this tile.
-    pub const fn is_goal(self) -> bool {
-        matches!(self, Self::Goal | Self::GateGoal)
+        matches!(self, Self::Gate)
     }
 
     fn symbol(self) -> char {
@@ -121,9 +115,8 @@ impl Tile {
             Self::Empty => ' ',
             Self::Wall => '#',
             Self::Gate => 'D',
-            Self::GateGoal => 'X',
-            Self::PressurePlate => 'P',
-            Self::Goal => 'G',
+            Self::PressurePlateBase => 'P',
+            Self::Pedestal => 'G',
             Self::Skull => 'S',
             Self::Torch => 't',
             Self::Unknown => '?',
@@ -160,8 +153,18 @@ impl Level {
         }
     }
 
+    /// Whether this occupiable position is immediately above a goal pedestal.
+    pub fn is_goal(&self, position: Position) -> bool {
+        self.tile_at(position.offset(0, 1)) == Tile::Pedestal
+    }
+
+    /// Whether this occupiable position is immediately above a pressure-plate base.
+    pub fn is_pressure_plate(&self, position: Position) -> bool {
+        self.tile_at(position.offset(0, 1)) == Tile::PressurePlateBase
+    }
+
     pub(crate) fn has_goal(&self) -> bool {
-        self.tiles.iter().any(|tile| tile.is_goal())
+        self.tiles.contains(&Tile::Pedestal)
     }
 }
 
@@ -200,10 +203,11 @@ impl GameState {
     ///
     /// `C` creates a map cube; `O` creates the player's existing cube (at most
     /// one). Short rows are padded with empty tiles. Indentation is significant;
-    /// trailing line endings are allowed. Goals and torches are passable for all
-    /// bodies and projectiles. Skulls are passable for the player and projectiles,
-    /// but block cubes. Unknown tiles stop projectiles but do not block player
-    /// movement or supply ground support.
+    /// trailing line endings are allowed. `G` goal pedestals and `P` pressure-plate
+    /// bases are solid; their interactive positions are one tile above. Torches
+    /// are passable for all bodies and projectiles. Skulls are passable for the
+    /// player and projectiles, but block cubes. Unknown tiles stop projectiles but
+    /// do not block player movement or supply ground support.
     pub fn from_ascii(map: &str) -> Result<Self, ParseLevelError> {
         Self::from_ascii_with_settings(map, GameSettings::default())
     }
@@ -241,9 +245,8 @@ impl GameState {
                     ' ' => Tile::Empty,
                     '#' => Tile::Wall,
                     'D' => Tile::Gate,
-                    'X' => Tile::GateGoal,
-                    'P' => Tile::PressurePlate,
-                    'G' => Tile::Goal,
+                    'P' => Tile::PressurePlateBase,
+                    'G' => Tile::Pedestal,
                     'S' => Tile::Skull,
                     't' => Tile::Torch,
                     '?' => Tile::Unknown,
@@ -310,21 +313,22 @@ impl GameState {
         self.status
     }
 
-    /// Walls, closed gates, and both kinds of cube are solid and supply ground support.
+    /// Walls, feature bases, closed gates, and both kinds of cube are solid and
+    /// supply ground support.
     pub fn is_solid(&self, position: Position) -> bool {
         self.is_solid_tile(position) || self.cubes.iter().any(|cube| cube.position == position)
     }
 
-    /// Pressure plates are active while occupied by the player or either kind of cube.
+    /// A pressure plate is active while the position above its base is occupied
+    /// by the player or either kind of cube.
     pub fn pressure_plates_active(&self) -> bool {
         self.pressure_plates_active_ignoring_cube(None)
     }
 
     fn pressure_plates_active_ignoring_cube(&self, ignored_cube: Option<usize>) -> bool {
-        self.level.tile_at(self.player.position) == Tile::PressurePlate
+        self.level.is_pressure_plate(self.player.position)
             || self.cubes.iter().enumerate().any(|(index, cube)| {
-                Some(index) != ignored_cube
-                    && self.level.tile_at(cube.position) == Tile::PressurePlate
+                Some(index) != ignored_cube && self.level.is_pressure_plate(cube.position)
             })
     }
 
@@ -342,7 +346,7 @@ impl GameState {
         ignored_cube: Option<usize>,
     ) -> bool {
         let tile = self.level.tile_at(position);
-        tile == Tile::Wall
+        matches!(tile, Tile::Wall | Tile::PressurePlateBase | Tile::Pedestal)
             || (tile.is_gate()
                 && self.pressure_plates_active_ignoring_cube(ignored_cube)
                 && !self.body_occupies(position))
@@ -401,7 +405,8 @@ impl GameState {
     /// substep, lower bodies move first so stacks and falling supports stay intact.
     /// A jump rises one tile and suspends player gravity for two more air inputs;
     /// gravity resumes at the end of the second one. Cubes have no airtime.
-    /// The level is won when the player's cube occupies a goal after the update.
+    /// The level is won when the player's cube occupies the position immediately
+    /// above a goal pedestal after the update.
     /// Won and game-over states ignore further inputs.
     pub fn step(&self, input: GameInput) -> Self {
         let mut next = self.clone();
@@ -466,9 +471,10 @@ impl GameState {
             next.player.air_inputs_remaining = 0;
         }
         if next.status == GameStatus::Playing
-            && next.cubes.iter().any(|cube| {
-                cube.source == CubeSource::Player && next.level.tile_at(cube.position).is_goal()
-            })
+            && next
+                .cubes
+                .iter()
+                .any(|cube| cube.source == CubeSource::Player && next.level.is_goal(cube.position))
         {
             next.status = GameStatus::Won;
         }
@@ -478,13 +484,7 @@ impl GameState {
     fn blocks_projectile(&self, position: Position) -> bool {
         !matches!(
             self.level.tile_at(position),
-            Tile::Empty
-                | Tile::Gate
-                | Tile::GateGoal
-                | Tile::PressurePlate
-                | Tile::Goal
-                | Tile::Skull
-                | Tile::Torch
+            Tile::Empty | Tile::Gate | Tile::Skull | Tile::Torch
         ) || self.is_solid(position)
             || position == self.player.position
     }

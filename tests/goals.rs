@@ -10,12 +10,12 @@ fn game(drawing: &str) -> GameState {
 
 #[test]
 fn projectiles_pass_through_goals_on_every_substep() {
-    for row in ["#@G    #", "#@ G   #", "#@  G  #"] {
+    for floor in ["##G#####", "###G####", "####G###"] {
         let initial = game(&format!(
             r#"
 ########
-{row}
-########
+#@     #
+{floor}
 "#
         ));
         let fired = initial.step(Shoot).step(Right);
@@ -33,8 +33,8 @@ fn spawning_the_player_cube_on_a_goal_wins_and_stops_play() {
     let initial = game(
         r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#,
     );
     let goal = Position { x: 2, y: 1 };
@@ -42,13 +42,14 @@ fn spawning_the_player_cube_on_a_goal_wins_and_stops_play() {
     let won = initial.step(Shoot).step(Right);
     assert_eq!(won.status(), GameStatus::Won);
     assert_eq!(won.cubes()[0].position, goal);
-    assert_eq!(won.level().tile_at(goal), Tile::Goal);
+    assert_eq!(won.level().tile_at(goal), Tile::Empty);
+    assert!(won.level().is_goal(goal));
     assert_level_eq(
         &won.to_ascii(),
         r#"
 #####
 #@O##
-#####
+##G##
 "#,
     );
     for input in [Jump, Left, Right, Shoot, Wait] {
@@ -61,8 +62,8 @@ fn spawning_the_player_cube_on_an_open_gate_goal_wins() {
     let initial = game(
         r#"
 #####
-#@X##
-#####
+#@D##
+##G##
 "#,
     );
     let goal = Position { x: 2, y: 1 };
@@ -70,13 +71,14 @@ fn spawning_the_player_cube_on_an_open_gate_goal_wins() {
 
     assert_eq!(won.status(), GameStatus::Won);
     assert_eq!(won.cubes()[0].position, goal);
-    assert_eq!(won.level().tile_at(goal), Tile::GateGoal);
+    assert_eq!(won.level().tile_at(goal), Tile::Gate);
+    assert!(won.level().is_goal(goal));
     assert_level_eq(
         &won.to_ascii(),
         r#"
 #####
 #@O##
-#####
+##G##
 "#,
     );
 }
@@ -86,8 +88,8 @@ fn player_and_map_cube_do_not_win_on_a_gate_goal() {
     let walking = game(
         r#"
 #####
-#@X #
-#####
+#@D #
+##G##
 "#,
     )
     .step(Right);
@@ -97,8 +99,8 @@ fn player_and_map_cube_do_not_win_on_a_gate_goal() {
     let pushed = game(
         r#"
 ######
-#@CX #
-######
+#@CD #
+###G##
 "#,
     )
     .step(Right);
@@ -112,8 +114,8 @@ fn pushing_onto_a_goal_wins_only_with_the_player_cube() {
         let initial = game(&format!(
             r#"
 ######
-#@{symbol}G #
-######
+#@{symbol}  #
+###G##
 "#
         ));
         let pushed = initial.step(Right);
@@ -123,8 +125,8 @@ fn pushing_onto_a_goal_wins_only_with_the_player_cube() {
     let walking = game(
         r#"
 ######
-#@G  #
-######
+#@   #
+##G###
 "#,
     )
     .step(Right);
@@ -140,8 +142,8 @@ fn falling_onto_a_goal_wins_only_with_the_player_cube() {
 #######
 #  {symbol}  #
 #     #
-#@ G  #
-#######
+#@    #
+###G###
 "#
         ));
         let fallen = initial.step(Wait);

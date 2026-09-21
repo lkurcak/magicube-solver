@@ -8,26 +8,27 @@ fn game(drawing: &str) -> GameState {
 }
 
 #[test]
-fn parses_and_renders_gates_and_pressure_plates() {
+fn parses_and_renders_gates_and_pressure_plate_bases() {
     let game = game(
         r#"
 #####
-#@PD#
-#####
+#@ D#
+##P##
         "#,
     );
 
     assert_eq!(
-        game.level().tile_at(Position { x: 2, y: 1 }),
-        Tile::PressurePlate
+        game.level().tile_at(Position { x: 2, y: 2 }),
+        Tile::PressurePlateBase
     );
+    assert!(game.level().is_pressure_plate(Position { x: 2, y: 1 }));
     assert_eq!(game.level().tile_at(Position { x: 3, y: 1 }), Tile::Gate);
     assert_level_eq(
         &game.to_ascii(),
         r#"
 #####
-#@PD#
-#####
+#@ D#
+##P##
 "#,
     );
 }
@@ -37,8 +38,8 @@ fn player_makes_gates_solid_only_while_on_a_pressure_plate() {
     let initial = game(
         r#"
 ########
-#@P D  #
-########
+#@  D  #
+##P#####
         "#,
     );
     let gate = Position { x: 4, y: 1 };
@@ -63,8 +64,8 @@ fn either_kind_of_cube_can_make_every_gate_solid() {
         let initial = game(&format!(
             r#"
 #########
-#@{cube} P D #
-#########
+#@{cube}   D #
+####P####
 "#
         ));
         let pressed = initial.step(GameInput::Right).step(GameInput::Right);
@@ -76,12 +77,26 @@ fn either_kind_of_cube_can_make_every_gate_solid() {
 }
 
 #[test]
+fn cube_initially_above_a_plate_base_starts_with_gates_active() {
+    let initial = game(
+        r#"
+#######
+#@C D #
+##P####
+"#,
+    );
+
+    assert!(initial.pressure_plates_active());
+    assert!(initial.is_solid(Position { x: 4, y: 1 }));
+}
+
+#[test]
 fn occupied_gate_waits_for_cube_and_player_to_leave_before_closing() {
     let initial = game(
         r#"
 ############
-#PC@  DC   #
-############
+# C@  DC   #
+#P##########
         "#,
     );
     let gate = Position { x: 6, y: 1 };
@@ -120,26 +135,24 @@ fn occupied_gate_waits_for_cube_and_player_to_leave_before_closing() {
 
 #[test]
 fn newly_spawned_cube_reactivates_a_plate_only_after_gravity() {
-    for gate in ['D', 'X'] {
-        let ready = game(&format!("    C\n\n\n  O\n@ P#{gate}#\n#### #"))
-            .step(GameInput::Wait)
-            .step(GameInput::Wait);
-        assert!(ready.pressure_plates_active());
-        assert!(ready.cubes().iter().any(|cube| {
-            cube.source == CubeSource::Map && cube.position == Position { x: 4, y: 3 }
-        }));
+    let ready = game("    C\n\n\n  O\n@  #D#\n##P# #")
+        .step(GameInput::Wait)
+        .step(GameInput::Wait);
+    assert!(ready.pressure_plates_active());
+    assert!(ready.cubes().iter().any(|cube| {
+        cube.source == CubeSource::Map && cube.position == Position { x: 4, y: 3 }
+    }));
 
-        let fired = ready.step(GameInput::Shoot).step(GameInput::Right);
+    let fired = ready.step(GameInput::Shoot).step(GameInput::Right);
 
-        assert!(fired.pressure_plates_active());
-        assert!(fired.is_solid(Position { x: 4, y: 4 }));
-        assert!(fired.cubes().iter().any(|cube| {
-            cube.source == CubeSource::Player && cube.position == Position { x: 2, y: 4 }
-        }));
-        assert!(fired.cubes().iter().any(|cube| {
-            cube.source == CubeSource::Map && cube.position == Position { x: 4, y: 5 }
-        }));
-    }
+    assert!(fired.pressure_plates_active());
+    assert!(fired.is_solid(Position { x: 4, y: 4 }));
+    assert!(fired.cubes().iter().any(|cube| {
+        cube.source == CubeSource::Player && cube.position == Position { x: 2, y: 4 }
+    }));
+    assert!(fired.cubes().iter().any(|cube| {
+        cube.source == CubeSource::Map && cube.position == Position { x: 4, y: 5 }
+    }));
 }
 
 #[test]
@@ -148,8 +161,8 @@ fn ordinary_falling_cube_still_activates_a_plate_during_gravity() {
         r#"
     C
 @ C D
-# P
-  #
+#
+  P
         "#,
     );
 
@@ -175,8 +188,8 @@ fn active_gates_block_players_cubes_and_projectiles() {
     let player = game(
         r#"
 #####
-#@PD#
-#####
+#@ D#
+##P##
         "#,
     )
     .step(GameInput::Right);
@@ -185,8 +198,8 @@ fn active_gates_block_players_cubes_and_projectiles() {
     let cube = game(
         r#"
 ########
-#@C PCD#
-########
+#@C  CD#
+####P###
         "#,
     )
     .step(GameInput::Right)
@@ -196,8 +209,8 @@ fn active_gates_block_players_cubes_and_projectiles() {
     let projectile = game(
         r#"
 #########
-#D @C P #
-#########
+#D @C   #
+######P##
         "#,
     )
     .step(GameInput::Right)
@@ -219,8 +232,8 @@ fn gate_goals_follow_gate_collision_rules() {
     let open = game(
         r#"
 ######
-#@ X #
-######
+#@ D #
+###G##
         "#,
     );
     let gate_goal = Position { x: 3, y: 1 };
@@ -229,8 +242,8 @@ fn gate_goals_follow_gate_collision_rules() {
     let closed = game(
         r#"
 ######
-#@PX #
-######
+#@ D #
+##PG##
         "#,
     )
     .step(GameInput::Right);
@@ -240,8 +253,8 @@ fn gate_goals_follow_gate_collision_rules() {
     let shot = game(
         r#"
 #########
-#X @C P #
-#########
+#D @C   #
+#G####P##
         "#,
     )
     .step(GameInput::Right)

@@ -141,12 +141,14 @@ grounded-only rules, regardless of the manual-play toggles. During gameplay,
 
 The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
-`P` is a pressure plate, `D` is a gate, and `X` combines a gate with a goal.
+`P` is a pressure-plate base, `G` is a goal pedestal, and `D` is a gate.
+Both bases are solid; their interactive position is the cell immediately above.
 Gates are normally passable, but become solid while the player or either kind of
-cube occupies a pressure plate. An occupied gate stays open until both the player
-and all cubes have left its tile.
+cube occupies the cell above a pressure-plate base. An occupied gate stays open
+until both the player and all cubes have left its tile.
 A falling cube crushing the player forces undo or restart before further play.
-Place your `O` cube on `G` or `X` to win; the victory screen supports undo and
+Place your `O` cube immediately above `G` to win; a `D` in that cell naturally
+acts as both a gate and a goal. The victory screen supports undo and
 restart too.
 The view follows the
 player when the level is larger than the terminal or the player leaves the map.
@@ -176,7 +178,7 @@ automatic save; undoing or restarting and winning again saves a new record.
 A save failure is displayed without interrupting play; press **P** to retry.
 Saving does not advance time or add an undo entry.
 
-New records use format version **4** and include a game version, level name, the
+New records use format version **5** and include a game version, level name, the
 complete starting ASCII map,
 `settings: { "allow_airborne_shooting": false, "allow_airborne_pushing": false, "projectile_tiles_per_update": 3 }`,
 outcome (`in_progress`, `won`, or `game_over`), and an ordered `inputs`
@@ -186,10 +188,9 @@ recorded explicitly as `wait`. Undone inputs are excluded and
 restart clears the sequence. A partial attempt can also be saved while aiming.
 The embedded map makes the record usable without the original level file or
 checkout: parse `level.map` with the recorded settings and apply `inputs` in
-order to replay it. Version-3 records require both airborne settings explicitly.
-Older version-1 records allow both airborne shooting and pushing; version-2
-records use their recorded shooting setting and allow airborne pushing. This
-preserves the original rules. Loading old records does not modify their files.
+order to replay it. Versions 1–4 used the previous level encoding and are
+rejected rather than silently interpreting their maps with the new base-tile
+semantics.
 
 Run the test suite, including exact reproduction of all authoritative levels:
 
@@ -269,7 +270,7 @@ recovering, and leaves it unchanged:
 ```rust
 use magicube_solver::{GameState, GameStatus, SolveOptions, SolveOutcome, solve};
 
-let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
+let initial = GameState::from_ascii("#####\n#@ ##\n##G##").unwrap();
 let result = solve(&initial, SolveOptions::default());
 match result.outcome {
     SolveOutcome::Solved(inputs) => {
@@ -343,13 +344,15 @@ compares the complete dynamic state while omitting the shared level from hashing
 
 Movement updates work as follows:
 
-- Left/right attempt to move one tile. `#` walls, closed `D` gates, and both kinds of cube are solid
+- Left/right attempt to move one tile. `#` walls, `G` goal pedestals, `P`
+  pressure-plate bases, closed `D` gates, and both kinds of cube are solid
   and support the player. Walking into a cube pushes the entire contiguous row
   of cubes one tile, provided the player is grounded and the space beyond it is
   not solid. `allow_airborne_pushing` removes only the support requirement.
   There is no limit on chain length, and a wall blocks the whole push.
   Pushed cubes then fall normally.
-  Skulls block cubes but not the player. Other map symbols do not block player or cube movement.
+  Skulls block cubes but not the player. Torches and unknown tiles do not block
+  player or cube movement.
 - Jump requires solid support immediately below and free space above. It rises one tile
   and grants two subsequent air inputs. Left/right and waiting spend those inputs;
   blocked moves and ignored airborne jump attempts also consume time.
@@ -358,11 +361,12 @@ Movement updates work as follows:
   solid obstacle before each tile. Landing ends any remaining airtime.
 - `Wait` advances time without horizontal movement.
 
-`P` pressure plates are passable. While the player or any cube occupies any
-pressure plate, every `D` gate behaves like a wall for movement, gravity, and
-projectiles once its tile is empty. A gate occupied when the plate is pressed
-stays open; if a cube is pushed off and the player takes its place, it waits for
-the player to leave before closing. Otherwise gates are passable.
+`P` pressure-plate bases are solid. While the player or any cube occupies the
+cell immediately above any base, every `D` gate behaves like a wall for
+movement, gravity, and projectiles once its tile is empty. A gate occupied when
+the plate is pressed stays open; if a cube is pushed off and the player takes
+its place, it waits for the player to leave before closing. Otherwise gates are
+passable.
 
 With default settings, `Shoot` enters aiming only while grounded. Unsupported
 attempts are ignored without advancing time. Set `allow_airborne_shooting` to
@@ -370,8 +374,8 @@ allow entering aim and firing anywhere in the air, including during jumps.
 Entering/cancelling aim never advances time. While aiming, left/right attempts
 to fire and other movement inputs are ignored. A blocked shot stays in aiming mode
 and preserves the previous cube and projectile. The adjacent tile must be
-unoccupied and passable before firing (empty, goal, torch, skull, pressure plate,
-or an inactive gate).
+unoccupied and passable before firing (empty, torch, skull, or an inactive gate).
+A derived goal or pressure-plate position is otherwise an ordinary empty cell.
 A successful shot immediately removes the
 previous `O` cube and replaces any previous projectile, leaving map cubes intact.
 
@@ -386,22 +390,25 @@ Projectiles move `projectile_tiles_per_update` tiles per update (three by defaul
 including the firing update and checking each tile in order. A falling cube
 blocks projectiles across its complete vertical gravity sweep for that update,
 including its starting, intermediate, and destination tiles. This transient
-occupancy affects projectile collision only. Goals, torches, and skulls are
-passable; walls, unknown terrain, and occupied tiles stop
-a projectile and create an `O` cube in its last free position. If that position
-is a skull, the projectile is destroyed without creating the cube. After projectile movement, gravity runs in
-two single-tile substeps for both player and cubes, processing lower bodies first.
+occupancy affects projectile collision only. Derived goal and pressure-plate
+positions, torches, and skulls are passable; walls, feature bases, unknown
+terrain, and occupied tiles stop a projectile and create an `O` cube in its
+last free position. If that position is a skull, the projectile is destroyed
+without creating the cube. After projectile movement, gravity runs in two
+single-tile substeps for both player and cubes, processing lower bodies first.
 This lets stacks fall together and prevents cubes from skipping through platforms,
-skulls, or the player. Newly spawned cubes participate in gravity immediately. A cube
-spawned on a pressure plate does not reactivate gates until that update's gravity
-pass finishes; other plate occupants continue to affect gates immediately. A cube
-entering the player's tile causes game over; further simulation inputs do nothing.
+skulls, or the player. Newly spawned cubes participate in gravity immediately.
+A cube spawned immediately above a pressure-plate base does not reactivate gates
+until that update's gravity pass finishes; other plate occupants continue to
+affect gates immediately. A cube entering the player's tile causes game over;
+further simulation inputs do nothing.
 
-`G` is a nonsolid target and does not stop players, cubes, or projectiles. `X` is
-both a goal and a gate, so its passability follows the pressure-plate gate rules.
-At the end of an update, the player's `O` cube occupying either goal wins, whether
+`G` is a solid goal pedestal. At the end of an update, the player's `O` cube
+occupying the cell immediately above a pedestal wins, whether
 it arrived by spawning, pushing, or falling. A map cube or the player reaching
-the goal does not win. Winning freezes the state until undo or restart.
+that cell does not win. A `D` may occupy the goal cell independently, so its
+passability follows the pressure-plate gate rules. Winning freezes the state until
+undo or restart.
 
 Map coordinates increase rightward/downward. Outside the drawing is empty space;
 leaving the map has no special effect yet. Torches are decorative. Skulls are
@@ -409,5 +416,6 @@ passable for players and projectiles but act as walls for cubes. `to_ascii()`
 renders only the original map rectangle, so use `player().position` to inspect a
 player outside it.
 Maps require exactly one `@` and can include map cubes (`C`), at most one existing
-player cube (`O`), gates (`D`), gate-goals (`X`), and pressure plates (`P`). Ragged
+player cube (`O`), gates (`D`), goal pedestals (`G`), and pressure-plate bases
+(`P`). Ragged
 rows are padded with empty tiles, matching the screenshot importer's format.

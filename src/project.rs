@@ -14,7 +14,7 @@ use crate::{
     GameInput, GameState, GameStatus, SolveOptions, SolveOutcome, SolveResult, SolveStats,
 };
 
-pub const SOLVER_CACHE_VERSION: u32 = 1;
+pub const SOLVER_CACHE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub struct ProjectPaths {
@@ -434,8 +434,8 @@ mod tests {
     fn successful_cache_is_replayed_but_failures_require_exact_fingerprint() {
         let map = r#"
 #####
-#@G##
-#####
+#@ ##
+##G##
 "#
         .trim_matches('\n');
         let result = SolveResult {
