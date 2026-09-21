@@ -393,6 +393,8 @@ is a skull, the projectile is destroyed without creating the cube. After project
 two single-tile substeps for both player and cubes, processing lower bodies first.
 This lets stacks fall together and prevents cubes from skipping through platforms,
 skulls, or the player. Newly spawned cubes participate in gravity immediately. A cube
+spawned on a pressure plate does not reactivate gates until that update's gravity
+pass finishes; other plate occupants continue to affect gates immediately. A cube
 entering the player's tile causes game over; further simulation inputs do nothing.
 
 `G` is a nonsolid target and does not stop players, cubes, or projectiles. `X` is

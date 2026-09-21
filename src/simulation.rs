@@ -317,11 +317,15 @@ impl GameState {
 
     /// Pressure plates are active while occupied by the player or either kind of cube.
     pub fn pressure_plates_active(&self) -> bool {
+        self.pressure_plates_active_ignoring_cube(None)
+    }
+
+    fn pressure_plates_active_ignoring_cube(&self, ignored_cube: Option<usize>) -> bool {
         self.level.tile_at(self.player.position) == Tile::PressurePlate
-            || self
-                .cubes
-                .iter()
-                .any(|cube| self.level.tile_at(cube.position) == Tile::PressurePlate)
+            || self.cubes.iter().enumerate().any(|(index, cube)| {
+                Some(index) != ignored_cube
+                    && self.level.tile_at(cube.position) == Tile::PressurePlate
+            })
     }
 
     fn body_occupies(&self, position: Position) -> bool {
@@ -329,17 +333,45 @@ impl GameState {
     }
 
     fn is_solid_tile(&self, position: Position) -> bool {
-        let tile = self.level.tile_at(position);
-        tile == Tile::Wall
-            || (tile.is_gate() && self.pressure_plates_active() && !self.body_occupies(position))
+        self.is_solid_tile_ignoring_plate_cube(position, None)
     }
 
-    fn is_solid_for_cube(&self, position: Position) -> bool {
-        self.is_solid(position) || self.level.tile_at(position) == Tile::Skull
+    fn is_solid_tile_ignoring_plate_cube(
+        &self,
+        position: Position,
+        ignored_cube: Option<usize>,
+    ) -> bool {
+        let tile = self.level.tile_at(position);
+        tile == Tile::Wall
+            || (tile.is_gate()
+                && self.pressure_plates_active_ignoring_cube(ignored_cube)
+                && !self.body_occupies(position))
+    }
+
+    fn is_solid_ignoring_plate_cube(
+        &self,
+        position: Position,
+        ignored_cube: Option<usize>,
+    ) -> bool {
+        self.is_solid_tile_ignoring_plate_cube(position, ignored_cube)
+            || self.cubes.iter().any(|cube| cube.position == position)
+    }
+
+    fn is_solid_for_cube_ignoring_plate_cube(
+        &self,
+        position: Position,
+        ignored_cube: Option<usize>,
+    ) -> bool {
+        self.is_solid_ignoring_plate_cube(position, ignored_cube)
+            || self.level.tile_at(position) == Tile::Skull
     }
 
     pub fn is_grounded(&self) -> bool {
-        self.is_solid(self.player.position.offset(0, 1))
+        self.is_grounded_ignoring_plate_cube(None)
+    }
+
+    fn is_grounded_ignoring_plate_cube(&self, ignored_cube: Option<usize>) -> bool {
+        self.is_solid_ignoring_plate_cube(self.player.position.offset(0, 1), ignored_cube)
     }
 
     /// Whether the rules allow aiming/firing at the current position. The shot
@@ -415,16 +447,21 @@ impl GameState {
         }
 
         let swept_cube_positions = next.gravity_swept_cube_positions();
-        next.advance_projectile(&swept_cube_positions);
+        let spawned_cube = next.advance_projectile(&swept_cube_positions);
+        // A cube created by this projectile becomes a plate activator only after
+        // the gravity response to removing the previous player cube has finished.
         if !jumped {
-            if next.is_grounded() {
+            if next.is_grounded_ignoring_plate_cube(spawned_cube) {
                 next.player.air_inputs_remaining = 0;
             } else {
                 next.player.air_inputs_remaining =
                     next.player.air_inputs_remaining.saturating_sub(1);
             }
         }
-        next.apply_gravity(!jumped && next.player.air_inputs_remaining == 0);
+        next.apply_gravity_ignoring_plate_cube(
+            !jumped && next.player.air_inputs_remaining == 0,
+            spawned_cube,
+        );
         if next.is_grounded() {
             next.player.air_inputs_remaining = 0;
         }
@@ -469,14 +506,13 @@ impl GameState {
         true
     }
 
-    fn advance_projectile(&mut self, swept_cube_positions: &[Position]) {
-        let Some(mut projectile) = self.projectile.take() else {
-            return;
-        };
+    fn advance_projectile(&mut self, swept_cube_positions: &[Position]) -> Option<usize> {
+        let mut projectile = self.projectile.take()?;
         for _ in 0..self.settings.projectile_tiles_per_update {
             let target = projectile.position.offset(projectile.direction.dx(), 0);
             if self.blocks_projectile(target) || swept_cube_positions.contains(&target) {
                 if self.level.tile_at(projectile.position) != Tile::Skull {
+                    let spawned_cube = self.cubes.len();
                     self.cubes.push(Cube {
                         position: projectile.position,
                         source: CubeSource::Player,
@@ -484,12 +520,14 @@ impl GameState {
                     if projectile.position == self.player.position {
                         self.status = GameStatus::GameOver;
                     }
+                    return Some(spawned_cube);
                 }
-                return;
+                return None;
             }
             projectile.position = target;
         }
         self.projectile = Some(projectile);
+        None
     }
 
     /// Tiles occupied by cubes at any point during this update's gravity pass.
@@ -502,18 +540,23 @@ impl GameState {
         }
         let mut preview = self.clone();
         let mut swept: Vec<_> = preview.cubes.iter().map(|cube| cube.position).collect();
-        preview.apply_gravity_recording(false, Some(&mut swept));
+        preview.apply_gravity_recording(false, Some(&mut swept), None);
         swept
     }
 
-    fn apply_gravity(&mut self, player_falls: bool) {
-        self.apply_gravity_recording(player_falls, None);
+    fn apply_gravity_ignoring_plate_cube(
+        &mut self,
+        player_falls: bool,
+        ignored_cube: Option<usize>,
+    ) {
+        self.apply_gravity_recording(player_falls, None, ignored_cube);
     }
 
     fn apply_gravity_recording(
         &mut self,
         player_falls: bool,
         mut swept_cube_positions: Option<&mut Vec<Position>>,
+        ignored_plate_cube: Option<usize>,
     ) {
         for _ in 0..2 {
             // None identifies the player; Some(index) identifies a cube.
@@ -531,11 +574,11 @@ impl GameState {
                 }
                 match body {
                     None if player_falls => {
-                        self.try_move(0, 1);
+                        self.try_move_ignoring_plate_cube(0, 1, ignored_plate_cube);
                     }
                     Some(index) => {
                         let target = self.cubes[index].position.offset(0, 1);
-                        if !self.is_solid_for_cube(target) {
+                        if !self.is_solid_for_cube_ignoring_plate_cube(target, ignored_plate_cube) {
                             self.cubes[index].position = target;
                             if let Some(swept) = swept_cube_positions.as_deref_mut() {
                                 swept.push(target);
@@ -628,8 +671,17 @@ impl GameState {
     }
 
     fn try_move(&mut self, dx: isize, dy: isize) -> bool {
+        self.try_move_ignoring_plate_cube(dx, dy, None)
+    }
+
+    fn try_move_ignoring_plate_cube(
+        &mut self,
+        dx: isize,
+        dy: isize,
+        ignored_cube: Option<usize>,
+    ) -> bool {
         let position = self.player.position.offset(dx, dy);
-        if self.is_solid(position) {
+        if self.is_solid_ignoring_plate_cube(position, ignored_cube) {
             return false;
         }
         self.player.position = position;

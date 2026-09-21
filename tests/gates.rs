@@ -1,6 +1,6 @@
 mod support;
 
-use magicube_solver::{GameInput, GameState, Position, Tile};
+use magicube_solver::{CubeSource, GameInput, GameState, Position, Tile};
 use support::{assert_level_eq, level};
 
 fn game(drawing: &str) -> GameState {
@@ -116,6 +116,58 @@ fn occupied_gate_waits_for_cube_and_player_to_leave_before_closing() {
     assert_eq!(gate_freed.player().position, Position { x: 7, y: 1 });
     assert!(gate_freed.pressure_plates_active());
     assert!(gate_freed.is_solid(gate));
+}
+
+#[test]
+fn newly_spawned_cube_reactivates_a_plate_only_after_gravity() {
+    for gate in ['D', 'X'] {
+        let ready = game(&format!("    C\n\n\n  O\n@ P#{gate}#\n#### #"))
+            .step(GameInput::Wait)
+            .step(GameInput::Wait);
+        assert!(ready.pressure_plates_active());
+        assert!(ready.cubes().iter().any(|cube| {
+            cube.source == CubeSource::Map && cube.position == Position { x: 4, y: 3 }
+        }));
+
+        let fired = ready.step(GameInput::Shoot).step(GameInput::Right);
+
+        assert!(fired.pressure_plates_active());
+        assert!(fired.is_solid(Position { x: 4, y: 4 }));
+        assert!(fired.cubes().iter().any(|cube| {
+            cube.source == CubeSource::Player && cube.position == Position { x: 2, y: 4 }
+        }));
+        assert!(fired.cubes().iter().any(|cube| {
+            cube.source == CubeSource::Map && cube.position == Position { x: 4, y: 5 }
+        }));
+    }
+}
+
+#[test]
+fn ordinary_falling_cube_still_activates_a_plate_during_gravity() {
+    let initial = game(
+        r#"
+    C
+@ C D
+# P
+  #
+        "#,
+    );
+
+    let fallen = initial.step(GameInput::Wait);
+
+    assert!(fallen.pressure_plates_active());
+    assert!(
+        fallen
+            .cubes()
+            .iter()
+            .any(|cube| { cube.position == Position { x: 2, y: 2 } })
+    );
+    assert!(
+        fallen
+            .cubes()
+            .iter()
+            .any(|cube| { cube.position == Position { x: 4, y: 0 } })
+    );
 }
 
 #[test]
