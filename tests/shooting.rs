@@ -71,6 +71,18 @@ fn obstacles_block_shots_and_blocked_shots_preserve_the_previous_cube() {
 }
 
 #[test]
+fn projectile_destroyed_on_a_skull_does_not_spawn_the_player_cube() {
+    let fired = GameState::from_ascii("######\n# @S##\n######")
+        .unwrap()
+        .step(Shoot)
+        .step(Right);
+
+    assert!(fired.projectile().is_none());
+    assert!(fired.cubes().is_empty());
+    assert_eq!(fired.player().mode, PlayerMode::Recovering);
+}
+
+#[test]
 fn recovery_ignores_actions_for_exactly_one_update_but_moves_the_projectile() {
     let fired = GameState::from_ascii("############\n#          #\n# @        #\n############")
         .unwrap()

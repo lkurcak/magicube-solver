@@ -140,3 +140,13 @@ fn solves_bundled_level_7_with_no_longer_solution() {
          right right right right right jump right right jump right shoot right wait",
     );
 }
+
+
+#[test]
+fn solves_bundled_level_18_with_no_longer_solution() {
+    assert_solver_matches_saved_solution(
+         18,
+        include_str!("../data/levels/18.txt"),
+"right jump right right right right jump right shoot left wait right left left left left left jump left left right right left left shoot right wait jump right right jump right jump right shoot right wait left left right right right jump right right right right"
+    );
+}

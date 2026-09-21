@@ -27,6 +27,24 @@ fn wall_at_end_of_chain_blocks_the_entire_push() {
 }
 
 #[test]
+fn skull_at_end_of_chain_blocks_the_entire_push() {
+    for (row, input) in [("#@COS #", Right), ("# SCO@#", Left)] {
+        let initial = GameState::from_ascii(&format!("#######\n{row}\n#######")).unwrap();
+        assert_eq!(initial.step(input), initial);
+    }
+}
+
+#[test]
+fn skulls_stop_falling_cubes() {
+    let initial =
+        GameState::from_ascii("#######\n# C   #\n#     #\n# S   #\n#  @  #\n#######").unwrap();
+    let fallen = initial.step(Wait);
+
+    assert_eq!(fallen.cubes()[0].position.y, 2);
+    assert_eq!(fallen.step(Wait).cubes()[0].position.y, 2);
+}
+
+#[test]
 fn cube_pushed_off_a_ledge_falls_in_the_same_update() {
     let initial = GameState::from_ascii("#######\n#@CO  #\n####  #\n#     #\n#######").unwrap();
     let pushed = initial.step(Right);

@@ -326,7 +326,7 @@ Movement updates work as follows:
   not solid. `allow_airborne_pushing` removes only the support requirement.
   There is no limit on chain length, and a wall blocks the whole push.
   Pushed cubes then fall normally.
-  Other map symbols do not block player or cube movement.
+  Skulls block cubes but not the player. Other map symbols do not block player or cube movement.
 - Jump requires solid support immediately below and free space above. It rises one tile
   and grants two subsequent air inputs. Left/right and waiting spend those inputs;
   blocked moves and ignored airborne jump attempts also consume time.
@@ -363,10 +363,11 @@ blocks projectiles across its complete vertical gravity sweep for that update,
 including its starting, intermediate, and destination tiles. This transient
 occupancy affects projectile collision only. Goals, torches, and skulls are
 passable; walls, unknown terrain, and occupied tiles stop
-a projectile and create an `O` cube in its last free position. After projectile movement, gravity runs in
+a projectile and create an `O` cube in its last free position. If that position
+is a skull, the projectile is destroyed without creating the cube. After projectile movement, gravity runs in
 two single-tile substeps for both player and cubes, processing lower bodies first.
-This lets stacks fall together and prevents cubes from skipping through platforms
-or the player. Newly spawned cubes participate in gravity immediately. A cube
+This lets stacks fall together and prevents cubes from skipping through platforms,
+skulls, or the player. Newly spawned cubes participate in gravity immediately. A cube
 entering the player's tile causes game over; further simulation inputs do nothing.
 
 `G` is a nonsolid target and does not stop players, cubes, or projectiles. At the
@@ -375,8 +376,8 @@ it arrived by spawning, pushing, or falling. A map cube or the player reaching
 the goal does not win. Winning freezes the state until undo or restart.
 
 Map coordinates increase rightward/downward. Outside the drawing is empty space;
-leaving the map has no special effect yet. Torches and skulls are decorative for
-now and do not affect movement, projectiles, or gravity. `to_ascii()`
+leaving the map has no special effect yet. Torches are decorative. Skulls are
+passable for players and projectiles but act as walls for cubes. `to_ascii()`
 renders only the original map rectangle, so use `player().position` to inspect a
 player outside it.
 Maps require exactly one `@` and can include map cubes (`C`), at most one existing

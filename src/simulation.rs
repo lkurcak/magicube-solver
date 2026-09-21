@@ -184,9 +184,10 @@ impl GameState {
     ///
     /// `C` creates a map cube; `O` creates the player's existing cube (at most
     /// one). Short rows are padded with empty tiles. Indentation is significant;
-    /// trailing line endings are allowed. Goals, skulls, and torches are passable
-    /// for all bodies and projectiles. Unknown tiles stop projectiles but do not
-    /// block player movement or supply ground support.
+    /// trailing line endings are allowed. Goals and torches are passable for all
+    /// bodies and projectiles. Skulls are passable for the player and projectiles,
+    /// but block cubes. Unknown tiles stop projectiles but do not block player
+    /// movement or supply ground support.
     pub fn from_ascii(map: &str) -> Result<Self, ParseLevelError> {
         Self::from_ascii_with_settings(map, GameSettings::default())
     }
@@ -312,6 +313,10 @@ impl GameState {
             Tile::Gate => self.pressure_plates_active(),
             _ => false,
         }
+    }
+
+    fn is_solid_for_cube(&self, position: Position) -> bool {
+        self.is_solid(position) || self.level.tile_at(position) == Tile::Skull
     }
 
     pub fn is_grounded(&self) -> bool {
@@ -446,12 +451,14 @@ impl GameState {
         for _ in 0..self.settings.projectile_tiles_per_update {
             let target = projectile.position.offset(projectile.direction.dx(), 0);
             if self.blocks_projectile(target) || swept_cube_positions.contains(&target) {
-                self.cubes.push(Cube {
-                    position: projectile.position,
-                    source: CubeSource::Player,
-                });
-                if projectile.position == self.player.position {
-                    self.status = GameStatus::GameOver;
+                if self.level.tile_at(projectile.position) != Tile::Skull {
+                    self.cubes.push(Cube {
+                        position: projectile.position,
+                        source: CubeSource::Player,
+                    });
+                    if projectile.position == self.player.position {
+                        self.status = GameStatus::GameOver;
+                    }
                 }
                 return;
             }
@@ -503,7 +510,7 @@ impl GameState {
                     }
                     Some(index) => {
                         let target = self.cubes[index].position.offset(0, 1);
-                        if !self.is_solid(target) {
+                        if !self.is_solid_for_cube(target) {
                             self.cubes[index].position = target;
                             if let Some(swept) = swept_cube_positions.as_deref_mut() {
                                 swept.push(target);
@@ -580,7 +587,12 @@ impl GameState {
                     chain.push(index);
                     target = target.offset(dx, 0);
                 }
-                None => break,
+                None => {
+                    if !chain.is_empty() && self.level.tile_at(target) == Tile::Skull {
+                        return false;
+                    }
+                    break;
+                }
             }
         }
         for index in chain {
