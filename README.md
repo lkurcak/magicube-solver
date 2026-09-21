@@ -143,7 +143,8 @@ The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
 `P` is a pressure plate, `D` is a gate, and `X` combines a gate with a goal.
 Gates are normally passable, but become solid while the player or either kind of
-cube occupies a pressure plate.
+cube occupies a pressure plate. An occupied gate stays open until both the player
+and all cubes have left its tile.
 A falling cube crushing the player forces undo or restart before further play.
 Place your `O` cube on `G` or `X` to win; the victory screen supports undo and
 restart too.
@@ -359,7 +360,9 @@ Movement updates work as follows:
 
 `P` pressure plates are passable. While the player or any cube occupies any
 pressure plate, every `D` gate behaves like a wall for movement, gravity, and
-projectiles. Otherwise gates are passable.
+projectiles once its tile is empty. A gate occupied when the plate is pressed
+stays open; if a cube is pushed off and the player takes its place, it waits for
+the player to leave before closing. Otherwise gates are passable.
 
 With default settings, `Shoot` enters aiming only while grounded. Unsupported
 attempts are ignored without advancing time. Set `allow_airborne_shooting` to

@@ -76,6 +76,49 @@ fn either_kind_of_cube_can_make_every_gate_solid() {
 }
 
 #[test]
+fn occupied_gate_waits_for_cube_and_player_to_leave_before_closing() {
+    let initial = game(
+        r#"
+############
+#PC@  DC   #
+############
+        "#,
+    );
+    let gate = Position { x: 6, y: 1 };
+
+    // Fire the player's cube onto the open gate, using the map cube to stop it.
+    let gate_occupied = initial
+        .step(GameInput::Shoot)
+        .step(GameInput::Right)
+        .step(GameInput::Wait);
+    assert!(
+        gate_occupied
+            .cubes()
+            .iter()
+            .any(|cube| cube.position == gate)
+    );
+
+    // Push the left map cube onto the plate, then approach the occupied gate.
+    let at_gate = gate_occupied
+        .step(GameInput::Left)
+        .step(GameInput::Right)
+        .step(GameInput::Right)
+        .step(GameInput::Right);
+    assert!(at_gate.pressure_plates_active());
+
+    // The cube can leave the gate while the player takes its place, so it still
+    // cannot close. It closes only after the player leaves on the next push.
+    let player_on_gate = at_gate.step(GameInput::Right);
+    assert_eq!(player_on_gate.player().position, gate);
+    assert!(!player_on_gate.is_solid(gate));
+
+    let gate_freed = player_on_gate.step(GameInput::Right);
+    assert_eq!(gate_freed.player().position, Position { x: 7, y: 1 });
+    assert!(gate_freed.pressure_plates_active());
+    assert!(gate_freed.is_solid(gate));
+}
+
+#[test]
 fn active_gates_block_players_cubes_and_projectiles() {
     let player = game(
         r#"

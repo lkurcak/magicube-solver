@@ -324,9 +324,14 @@ impl GameState {
                 .any(|cube| self.level.tile_at(cube.position) == Tile::PressurePlate)
     }
 
+    fn body_occupies(&self, position: Position) -> bool {
+        self.player.position == position || self.cubes.iter().any(|cube| cube.position == position)
+    }
+
     fn is_solid_tile(&self, position: Position) -> bool {
         let tile = self.level.tile_at(position);
-        tile == Tile::Wall || (tile.is_gate() && self.pressure_plates_active())
+        tile == Tile::Wall
+            || (tile.is_gate() && self.pressure_plates_active() && !self.body_occupies(position))
     }
 
     fn is_solid_for_cube(&self, position: Position) -> bool {
