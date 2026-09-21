@@ -244,7 +244,16 @@ mod tests {
 
     #[test]
     fn undo_restores_airtime_and_restart_discards_history() {
-        let initial = GameState::from_ascii("#######\n#     #\n# @   #\n#######").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+#######
+#     #
+# @   #
+#######
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let mut app = App::new(initial.clone());
         app.apply(Command::Undo);
         assert_eq!(app.state, initial);
@@ -271,7 +280,15 @@ mod tests {
 
     #[test]
     fn recovery_is_recorded_once_and_undo_groups_it_with_the_shot() {
-        let initial = GameState::from_ascii("##########\n#@       #\n##########").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+##########
+#@       #
+##########
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let mut app = App::new(initial.clone());
         app.advance_recovery();
         assert_eq!(app.steps(), 0);
@@ -308,10 +325,36 @@ mod tests {
     #[test]
     fn wins_and_deaths_stop_recovery_and_allow_undoing_the_shot() {
         for (map, status, needs_recovery) in [
-            ("#####\n#@G##\n#####", GameStatus::Won, false),
-            ("########\n#@  G###\n########", GameStatus::Won, true),
             (
-                "#######\n# C   #\n#     #\n#     #\n# @   #\n#######",
+                r#"
+#####
+#@G##
+#####
+"#
+                .trim_matches('\n'),
+                GameStatus::Won,
+                false,
+            ),
+            (
+                r#"
+########
+#@  G###
+########
+"#
+                .trim_matches('\n'),
+                GameStatus::Won,
+                true,
+            ),
+            (
+                r#"
+#######
+# C   #
+#     #
+#     #
+# @   #
+#######
+"#
+                .trim_matches('\n'),
                 GameStatus::GameOver,
                 true,
             ),
@@ -337,11 +380,26 @@ mod tests {
     fn finished_games_allow_undo_and_restart_without_recording_ignored_inputs() {
         for (map, input, status) in [
             (
-                "#####\n# C #\n# @ #\n#####",
+                r#"
+#####
+# C #
+# @ #
+#####
+"#
+                .trim_matches('\n'),
                 GameInput::Wait,
                 GameStatus::GameOver,
             ),
-            ("######\n#@OG #\n######", GameInput::Right, GameStatus::Won),
+            (
+                r#"
+######
+#@OG #
+######
+"#
+                .trim_matches('\n'),
+                GameInput::Right,
+                GameStatus::Won,
+            ),
         ] {
             let initial = GameState::from_ascii(map).unwrap();
             let mut app = App::new(initial.clone());

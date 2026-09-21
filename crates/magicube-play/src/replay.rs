@@ -203,7 +203,16 @@ mod tests {
 
     #[test]
     fn scrubbing_restores_exact_snapshots_including_no_ops_and_shot_recovery() {
-        let initial = GameState::from_ascii("#######\n#     #\n#@ G###\n#######").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+#######
+#     #
+#@ G###
+#######
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let inputs = vec![Left, Shoot, Jump, Shoot, Shoot, Right, Wait];
         let mut replay = Replay::new(initial.clone(), inputs.clone());
         let now = Instant::now();
@@ -236,7 +245,13 @@ mod tests {
 
     #[test]
     fn ten_step_seeks_and_endpoints_clamp_without_wrapping() {
-        let initial = GameState::from_ascii("@ G").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+@ G
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let mut replay = Replay::new(initial.clone(), vec![Wait; 25]);
         let now = Instant::now();
         for (command, expected) in [
@@ -264,7 +279,15 @@ mod tests {
 
     #[test]
     fn autoplay_pauses_seeks_resumes_and_stops_at_the_end_without_skipping() {
-        let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+#####
+#@G##
+#####
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let mut replay = Replay::new(initial, vec![Shoot, Right]);
         let now = Instant::now();
         replay.apply(Command::TogglePlayback, now);
@@ -343,7 +366,15 @@ mod tests {
 
     #[test]
     fn solver_output_uses_the_same_timeline_and_reports_search_failures() {
-        let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+#####
+#@G##
+#####
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let mut replay = Replay::from_solver(initial.clone(), SolveOptions::default()).unwrap();
         assert_eq!(replay.state(), &initial);
         assert_eq!(replay.len(), 2);
@@ -360,7 +391,15 @@ mod tests {
             )
             .is_err()
         );
-        let unsolvable = GameState::from_ascii("#####\n#@#G#\n#####").unwrap();
+        let unsolvable = GameState::from_ascii(
+            r#"
+#####
+#@#G#
+#####
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         assert!(Replay::from_solver(unsolvable, SolveOptions::default()).is_err());
     }
 }

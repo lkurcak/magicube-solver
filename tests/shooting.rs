@@ -1,16 +1,37 @@
+mod support;
+
 use magicube_solver::GameInput::{Jump, Left, Right, Shoot, Wait};
 use magicube_solver::{
     CubeSource, GameSettings, GameState, GameStatus, ParseLevelError, PlayerMode, Position,
 };
+use support::{assert_cube_layout_eq, level};
+
+fn game(drawing: &str) -> GameState {
+    GameState::from_ascii(&level(drawing)).unwrap()
+}
 
 #[test]
 fn aiming_and_cancel_pause_the_whole_world() {
-    let initial =
-        GameState::from_ascii("##########\n#   C    #\n#        #\n#@   O   #\n##########")
-            .unwrap();
+    let initial = game(
+        r#"
+##########
+#   C    #
+#        #
+#@   O   #
+##########
+"#,
+    );
     assert_eq!(
         initial.to_ascii(),
-        "##########\n#   C    #\n#        #\n#@   O   #\n##########"
+        level(
+            r#"
+##########
+#   C    #
+#        #
+#@   O   #
+##########
+"#
+        )
     );
     let aiming = initial.step(Shoot);
     assert_eq!(aiming.player().mode, PlayerMode::Aiming);
@@ -19,11 +40,16 @@ fn aiming_and_cancel_pause_the_whole_world() {
     assert_eq!(aiming.step(Jump), aiming);
     assert_eq!(aiming.step(Shoot), initial);
 
-    let flying = GameState::from_ascii("##########\n#@       #\n##########")
-        .unwrap()
-        .step(Shoot)
-        .step(Right)
-        .step(Wait);
+    let flying = game(
+        r#"
+##########
+#@       #
+##########
+"#,
+    )
+    .step(Shoot)
+    .step(Right)
+    .step(Wait);
     assert!(flying.projectile().is_some());
     assert_eq!(flying.step(Shoot).step(Shoot), flying);
 }
@@ -39,7 +65,13 @@ fn projectile_checks_each_traversed_tile_and_spawns_in_the_last_empty_one() {
         ("#@St # #", Right, Some(4), 4),
         ("# #tS @#", Left, Some(3), 3),
     ] {
-        let initial = GameState::from_ascii(&format!("########\n{row}\n########")).unwrap();
+        let initial = game(&format!(
+            r#"
+########
+{row}
+########
+"#
+        ));
         let mut shot = initial.step(Shoot).step(direction);
         assert_eq!(shot.player().position, initial.player().position);
         assert_eq!(shot.projectile().map(|p| p.position.x), projectile_x);
@@ -57,11 +89,23 @@ fn projectile_checks_each_traversed_tile_and_spawns_in_the_last_empty_one() {
 #[test]
 fn obstacles_block_shots_and_blocked_shots_preserve_the_previous_cube() {
     for obstacle in ['#', 'C', 'O', '?'] {
-        let initial = GameState::from_ascii(&format!("######\n# @{obstacle} #\n######")).unwrap();
+        let initial = game(&format!(
+            r#"
+######
+# @{obstacle} #
+######
+"#
+        ));
         let aiming = initial.step(Shoot);
         assert_eq!(aiming.step(Right), aiming, "obstacle {obstacle}");
     }
-    let initial = GameState::from_ascii("########\n# @# O #\n########").unwrap();
+    let initial = game(
+        r#"
+########
+# @# O #
+########
+"#,
+    );
     let aiming = initial.step(Shoot);
     assert_eq!(aiming.step(Right), aiming);
     let fired = aiming.step(Left);
@@ -72,10 +116,15 @@ fn obstacles_block_shots_and_blocked_shots_preserve_the_previous_cube() {
 
 #[test]
 fn projectile_destroyed_on_a_skull_does_not_spawn_the_player_cube() {
-    let fired = GameState::from_ascii("######\n# @S##\n######")
-        .unwrap()
-        .step(Shoot)
-        .step(Right);
+    let fired = game(
+        r#"
+######
+# @S##
+######
+"#,
+    )
+    .step(Shoot)
+    .step(Right);
 
     assert!(fired.projectile().is_none());
     assert!(fired.cubes().is_empty());
@@ -84,10 +133,16 @@ fn projectile_destroyed_on_a_skull_does_not_spawn_the_player_cube() {
 
 #[test]
 fn recovery_ignores_actions_for_exactly_one_update_but_moves_the_projectile() {
-    let fired = GameState::from_ascii("############\n#          #\n# @        #\n############")
-        .unwrap()
-        .step(Shoot)
-        .step(Right);
+    let fired = game(
+        r#"
+############
+#          #
+# @        #
+############
+"#,
+    )
+    .step(Shoot)
+    .step(Right);
     assert_eq!(fired.player().mode, PlayerMode::Recovering);
     let recovered = fired.step(Wait);
     assert_eq!(recovered.player().mode, PlayerMode::Normal);
@@ -112,8 +167,14 @@ fn recovery_ignores_actions_for_exactly_one_update_but_moves_the_projectile() {
 
 #[test]
 fn projectile_distance_is_configurable_and_defaults_to_three_tiles() {
-    let map = "##########\n#@       #\n##########";
-    let default = GameState::from_ascii(map).unwrap().step(Shoot).step(Right);
+    let map = level(
+        r#"
+##########
+#@       #
+##########
+"#,
+    );
+    let default = GameState::from_ascii(&map).unwrap().step(Shoot).step(Right);
     assert_eq!(default.settings().projectile_tiles_per_update, 3);
     assert_eq!(
         default.projectile().unwrap().position,
@@ -121,7 +182,7 @@ fn projectile_distance_is_configurable_and_defaults_to_three_tiles() {
     );
 
     let configured = GameState::from_ascii_with_settings(
-        map,
+        &map,
         GameSettings {
             projectile_tiles_per_update: 1,
             ..GameSettings::default()
@@ -138,7 +199,14 @@ fn projectile_distance_is_configurable_and_defaults_to_three_tiles() {
 
 #[test]
 fn removing_the_player_cube_settles_its_stack_before_projectile_travel() {
-    let initial = GameState::from_ascii("#######\n#  C  #\n#@ O# #\n#######").unwrap();
+    let initial = game(
+        r#"
+#######
+#  C  #
+#@ O# #
+#######
+"#,
+    );
     let fired = initial.step(Shoot).step(Right);
 
     assert!(fired.projectile().is_none());
@@ -149,11 +217,41 @@ fn removing_the_player_cube_settles_its_stack_before_projectile_travel() {
 #[test]
 fn falling_cubes_block_projectiles_at_the_start_middle_and_end_of_their_sweep() {
     for (map, projectile_y, cube_y) in [
-        ("#######\n#     #\n#@ C# #\n###O  #\n#######", 2, 3),
-        ("#######\n#  C  #\n#@ O# #\n###   #\n#######", 2, 3),
-        ("#######\n#  C  #\n#  O  #\n#@  # #\n#######", 3, 3),
+        (
+            r#"
+#######
+#     #
+#@ C# #
+###O  #
+#######
+"#,
+            2,
+            3,
+        ),
+        (
+            r#"
+#######
+#  C  #
+#@ O# #
+###   #
+#######
+"#,
+            2,
+            3,
+        ),
+        (
+            r#"
+#######
+#  C  #
+#  O  #
+#@  # #
+#######
+"#,
+            3,
+            3,
+        ),
     ] {
-        let fired = GameState::from_ascii(map).unwrap().step(Shoot).step(Right);
+        let fired = game(map).step(Shoot).step(Right);
         assert!(fired.projectile().is_none());
         assert_eq!(
             fired
@@ -174,10 +272,17 @@ fn falling_cubes_block_projectiles_at_the_start_middle_and_end_of_their_sweep() 
         );
     }
 
-    let misses = GameState::from_ascii("########\n#    C #\n#@   O##\n#####  #\n########")
-        .unwrap()
-        .step(Shoot)
-        .step(Right);
+    let misses = game(
+        r#"
+########
+#    C #
+#@   O##
+#####  #
+########
+"#,
+    )
+    .step(Shoot)
+    .step(Right);
     assert_eq!(
         misses.projectile().unwrap().position,
         Position { x: 4, y: 2 }
@@ -188,9 +293,25 @@ fn falling_cubes_block_projectiles_at_the_start_middle_and_end_of_their_sweep() 
 #[test]
 fn recovery_spends_airtime_and_applies_player_and_cube_gravity() {
     let initial = GameState::from_ascii_with_settings(
-        "############\n#        C #\n#          #\n#          #\n#          #\n#          #\n#          #\n# @        #\n############",
-        GameSettings { allow_airborne_shooting: true, ..GameSettings::default() },
-    ).unwrap();
+        &level(
+            r#"
+############
+#        C #
+#          #
+#          #
+#          #
+#          #
+#          #
+# @        #
+############
+"#,
+        ),
+        GameSettings {
+            allow_airborne_shooting: true,
+            ..GameSettings::default()
+        },
+    )
+    .unwrap();
     let fired = initial.step(Jump).step(Shoot).step(Right);
     assert_eq!(fired.player().air_inputs_remaining, 1);
     assert_eq!(fired.player().position, Position { x: 2, y: 6 });
@@ -205,10 +326,19 @@ fn recovery_spends_airtime_and_applies_player_and_cube_gravity() {
 
 #[test]
 fn shooting_requires_support_by_default_and_fun_mode_allows_jumps_and_falls() {
-    let map = "##########\n#        #\n#        #\n#        #\n#@       #\n##########";
+    let map = level(
+        r#"
+##########
+#        #
+#        #
+#        #
+#@       #
+##########
+"#,
+    );
     for allow_airborne_shooting in [false, true] {
         let initial = GameState::from_ascii_with_settings(
-            map,
+            &map,
             GameSettings {
                 allow_airborne_shooting,
                 ..GameSettings::default()
@@ -219,8 +349,19 @@ fn shooting_requires_support_by_default_and_fun_mode_allows_jumps_and_falls() {
         let jumping = initial.step(Jump);
         assert!(!jumping.is_grounded());
         assert!(jumping.player().air_inputs_remaining > 0);
-        let falling =
-            GameState::from_ascii_with_settings("@\n \n \n \n#", initial.settings()).unwrap();
+        let falling = GameState::from_ascii_with_settings(
+            &level(
+                r#"
+@
+
+
+
+#
+"#,
+            ),
+            initial.settings(),
+        )
+        .unwrap();
         assert_eq!(falling.player().air_inputs_remaining, 0);
         for airborne in [jumping, falling] {
             assert_eq!(airborne.can_shoot(), allow_airborne_shooting);
@@ -237,12 +378,12 @@ fn shooting_requires_support_by_default_and_fun_mode_allows_jumps_and_falls() {
             }
         }
     }
-    let default = GameState::from_ascii(map).unwrap();
+    let default = GameState::from_ascii(&map).unwrap();
     assert_eq!(default.settings(), GameSettings::default());
     assert_ne!(
         default,
         GameState::from_ascii_with_settings(
-            map,
+            &map,
             GameSettings {
                 allow_airborne_shooting: true,
                 ..GameSettings::default()
@@ -255,8 +396,14 @@ fn shooting_requires_support_by_default_and_fun_mode_allows_jumps_and_falls() {
 #[test]
 fn standing_on_either_cube_kind_allows_a_grounded_shot() {
     for cube in ['C', 'O'] {
-        let initial =
-            GameState::from_ascii(&format!("########\n# @    #\n# {cube}    #\n########")).unwrap();
+        let initial = game(&format!(
+            r#"
+########
+# @    #
+# {cube}    #
+########
+"#
+        ));
         assert!(initial.is_grounded());
         let fired = initial.step(Shoot).step(Right);
         assert_eq!(fired.player().mode, PlayerMode::Recovering);
@@ -266,7 +413,14 @@ fn standing_on_either_cube_kind_allows_a_grounded_shot() {
 
 #[test]
 fn a_new_shot_removes_only_the_player_cube_and_new_cubes_fall_immediately() {
-    let initial = GameState::from_ascii("##########\n#    C   #\n#@ O     #\n##########").unwrap();
+    let initial = game(
+        r#"
+##########
+#    C   #
+#@ O     #
+##########
+"#,
+    );
     let fired = initial.step(Shoot).step(Right);
     assert_eq!(fired.cubes().len(), 1);
     assert_eq!(fired.cubes()[0].source, CubeSource::Map);
@@ -279,11 +433,23 @@ fn a_new_shot_removes_only_the_player_cube_and_new_cubes_fall_immediately() {
     assert_eq!(hit_cube.symbol_at(Position { x: 4, y: 2 }), 'O');
     assert_eq!(hit_cube.symbol_at(Position { x: 5, y: 2 }), 'C');
 
-    let initial = GameState::from_ascii("#######\n#@ #  #\n##    #\n#     #\n#######").unwrap();
+    let initial = game(
+        r#"
+#######
+#@ #  #
+##    #
+#     #
+#######
+"#,
+    );
     let fired = initial.step(Shoot).step(Right);
     assert_eq!(fired.cubes()[0].position, Position { x: 2, y: 3 });
     assert_eq!(
-        GameState::from_ascii("@OO"),
+        GameState::from_ascii(&level(
+            r#"
+@OO
+"#,
+        )),
         Err(ParseLevelError::MultiplePlayerCubes)
     );
 }
@@ -291,10 +457,15 @@ fn a_new_shot_removes_only_the_player_cube_and_new_cubes_fall_immediately() {
 #[test]
 fn both_cube_kinds_support_jumps() {
     for symbol in ['C', 'O'] {
-        let initial = GameState::from_ascii(&format!(
-            "#######\n#     #\n#     #\n# @{symbol}  #\n#######"
-        ))
-        .unwrap();
+        let initial = game(&format!(
+            r#"
+#######
+#     #
+#     #
+# @{symbol}  #
+#######
+"#
+        ));
         let on_cube = initial.step(Jump).step(Right);
         assert_eq!(on_cube.player().position, Position { x: 3, y: 2 });
         assert!(on_cube.is_grounded());
@@ -307,13 +478,31 @@ fn both_cube_kinds_support_jumps() {
 
 #[test]
 fn falling_cube_stacks_move_two_tiles_and_stop_at_platforms() {
-    let initial = GameState::from_ascii("#####\n# C #\n# O #\n#   #\n#@  #\n#####").unwrap();
+    let initial = game(
+        r#"
+#####
+# C #
+# O #
+#   #
+#@  #
+#####
+"#,
+    );
     let fallen = initial.step(Wait);
     assert_eq!(fallen.cubes()[0].position, Position { x: 2, y: 3 });
     assert_eq!(fallen.cubes()[1].position, Position { x: 2, y: 4 });
     assert_eq!(fallen.step(Wait), fallen);
 
-    let initial = GameState::from_ascii("#####\n# C #\n#   #\n# # #\n#@  #\n#####").unwrap();
+    let initial = game(
+        r#"
+#####
+# C #
+#   #
+# # #
+#@  #
+#####
+"#,
+    );
     assert_eq!(
         initial.step(Wait).cubes()[0].position,
         Position { x: 2, y: 2 }
@@ -322,7 +511,16 @@ fn falling_cube_stacks_move_two_tiles_and_stop_at_platforms() {
 
 #[test]
 fn falling_cube_crushes_player_and_game_over_freezes_the_state() {
-    let initial = GameState::from_ascii("#####\n# C #\n#   #\n#   #\n# @ #\n#####").unwrap();
+    let initial = game(
+        r#"
+#####
+# C #
+#   #
+#   #
+# @ #
+#####
+"#,
+    );
     let falling = initial.step(Wait);
     assert_eq!(falling.status(), GameStatus::Playing);
     assert_eq!(falling.cubes()[0].position, Position { x: 2, y: 3 });
@@ -332,4 +530,27 @@ fn falling_cube_crushes_player_and_game_over_freezes_the_state() {
     for input in [Jump, Left, Right, Shoot, Wait] {
         assert_eq!(crushed.step(input), crushed);
     }
+}
+
+#[test]
+fn shooting_into_falling_cubes_produces_the_expected_layout() {
+    let initial = game(
+        r#"
+######
+# C  #
+#CO @#
+######
+"#,
+    );
+    let expected = game(
+        r#"
+######
+#    #
+#CCO@#
+######
+"#,
+    );
+    let shooting = initial.step(Shoot);
+    let shot = shooting.step(Left);
+    assert_cube_layout_eq(shot.cubes(), expected.cubes());
 }

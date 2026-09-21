@@ -70,7 +70,15 @@ pub struct SolveResult {
 /// ```
 /// use magicube_solver::{GameState, GameStatus, SolveOptions, SolveOutcome, solve};
 ///
-/// let initial = GameState::from_ascii("#####\n#@G##\n#####").unwrap();
+/// let initial = GameState::from_ascii(
+///     r#"
+/// #####
+/// #@G##
+/// #####
+/// "#
+///     .trim_matches('\n'),
+/// )
+/// .unwrap();
 /// let result = solve(&initial, SolveOptions::default());
 /// let SolveOutcome::Solved(inputs) = result.outcome else {
 ///     panic!("expected this small level to be solvable");
@@ -215,7 +223,16 @@ mod tests {
 
     #[test]
     fn visited_keys_distinguish_airtime_and_modes_with_identical_drawings() {
-        let initial = GameState::from_ascii("#####\n#   #\n# @ #\n#####").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+#####
+#   #
+# @ #
+#####
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let aiming = initial.step(GameInput::Shoot);
         assert_eq!(initial.to_ascii(), aiming.to_ascii());
         let jumping = initial.step(GameInput::Jump);

@@ -1,4 +1,7 @@
+mod support;
+
 use magicube_solver::{GameInput, GameState, ParseLevelError, Position, Tile};
+use support::{assert_level_eq, level};
 
 #[test]
 fn loads_existing_importer_maps_without_losing_tiles_or_indentation() {
@@ -24,31 +27,89 @@ fn short_rows_are_empty_and_crlf_line_endings_are_accepted() {
     assert_eq!(game.level().width(), 5);
     assert_eq!(game.level().height(), 3);
     assert_eq!(game.level().tile_at(Position { x: 2, y: 1 }), Tile::Empty);
-    assert_eq!(game.step(GameInput::Right).to_ascii(), "#####\n# @\n#####");
+    assert_level_eq(
+        &game.step(GameInput::Right).to_ascii(),
+        r#"
+#####
+# @
+#####
+"#,
+    );
+}
+
+#[test]
+fn gate_goals_round_trip_and_expose_both_capabilities() {
+    let game = GameState::from_ascii(&level(
+        r#"
+#####
+#@X #
+#####
+"#,
+    ))
+    .unwrap();
+    let position = Position { x: 2, y: 1 };
+    let tile = game.level().tile_at(position);
+
+    assert_eq!(tile, Tile::GateGoal);
+    assert!(tile.is_gate());
+    assert!(tile.is_goal());
+    assert_level_eq(
+        &game.to_ascii(),
+        r#"
+#####
+#@X #
+#####
+"#,
+    );
 }
 
 #[test]
 fn rejects_empty_maps_missing_or_multiple_players_and_invalid_symbols() {
     for (map, error) in [
-        ("", ParseLevelError::EmptyMap),
-        ("\n\r\n", ParseLevelError::EmptyMap),
-        ("###\n# #\n###", ParseLevelError::MissingPlayer),
-        ("@@", ParseLevelError::MultiplePlayers),
+        (String::new(), ParseLevelError::EmptyMap),
+        ("\n\r\n".to_owned(), ParseLevelError::EmptyMap),
         (
-            "@!",
+            level(
+                r#"
+###
+# #
+###
+"#,
+            ),
+            ParseLevelError::MissingPlayer,
+        ),
+        (
+            level(
+                r#"
+@@
+"#,
+            ),
+            ParseLevelError::MultiplePlayers,
+        ),
+        (
+            level(
+                r#"
+@!
+"#,
+            ),
             ParseLevelError::InvalidTile {
                 position: Position { x: 1, y: 0 },
                 symbol: '!',
             },
         ),
     ] {
-        assert_eq!(GameState::from_ascii(map), Err(error), "{map:?}");
+        assert_eq!(GameState::from_ascii(&map), Err(error), "{map:?}");
     }
 }
 
 #[test]
 fn outside_the_map_is_empty_and_does_not_grant_a_jump() {
-    let initial = GameState::from_ascii("@").unwrap();
+    let initial = GameState::from_ascii(&level(
+        r#"
+@
+"#,
+    ))
+    .unwrap();
     assert!(!initial.is_grounded());
     for (input, x) in [
         (GameInput::Left, -1),
@@ -69,7 +130,13 @@ fn outside_the_map_is_empty_and_does_not_grant_a_jump() {
 
 #[test]
 fn jump_can_rise_above_the_drawing_without_an_implicit_ceiling() {
-    let initial = GameState::from_ascii("@\n#").unwrap();
+    let initial = GameState::from_ascii(&level(
+        r#"
+@
+#
+"#,
+    ))
+    .unwrap();
     let jumping = initial.step(GameInput::Jump);
     assert_eq!(jumping.player().position, Position { x: 0, y: -1 });
     assert_eq!(

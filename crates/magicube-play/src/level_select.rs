@@ -452,7 +452,14 @@ mod tests {
         let levels = [BundledLevel {
             id: "1",
             name: "Level 1",
-            map: Some("###\n#@#\n###"),
+            map: Some(
+                r#"
+###
+#@#
+###
+"#
+                .trim_matches('\n'),
+            ),
             issues: &[],
         }];
         for (width, height) in [(80, 24), (30, 12), (1, 1)] {

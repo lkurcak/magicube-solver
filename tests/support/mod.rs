@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+
+use magicube_solver::{Cube, CubeSource};
+
 /// Turns an indented ASCII drawing into a level map.
 ///
 /// The first and last blank lines are ignored, as is indentation shared by
@@ -29,4 +33,21 @@ pub fn level(drawing: &str) -> String {
 /// Compares a rendered level with an indented ASCII drawing.
 pub fn assert_level_eq(actual: &str, expected: &str) {
     assert_eq!(level(actual), level(expected));
+}
+
+/// Compares cube layouts without depending on their internal storage order.
+pub fn assert_cube_layout_eq(actual: &[Cube], expected: &[Cube]) {
+    fn key(cube: &Cube) -> (isize, isize, u8) {
+        let source = match cube.source {
+            CubeSource::Map => 0,
+            CubeSource::Player => 1,
+        };
+        (cube.position.y, cube.position.x, source)
+    }
+
+    let mut actual = actual.to_vec();
+    let mut expected = expected.to_vec();
+    actual.sort_unstable_by_key(key);
+    expected.sort_unstable_by_key(key);
+    assert_eq!(actual, expected);
 }

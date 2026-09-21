@@ -12,11 +12,11 @@ fn game(drawing: &str) -> GameState {
 fn jump_grants_exactly_two_air_inputs() {
     let initial = game(
         r#"
-            #########
-            #       #
-            #       #
-            # @     #
-            #########
+#########
+#       #
+#       #
+# @     #
+#########
         "#,
     );
     let jumping = initial.step(Jump);
@@ -47,10 +47,10 @@ fn jump_grants_exactly_two_air_inputs() {
 fn every_pair_of_air_inputs_including_waits_and_reversals_is_supported() {
     let initial = game(
         r#"
-            #########
-            #       #
-            #   @   #
-            #########
+#########
+#       #
+#   @   #
+#########
         "#,
     );
     let inputs = [(Left, -1), (Right, 1), (Wait, 0)];
@@ -75,22 +75,22 @@ fn every_pair_of_air_inputs_including_waits_and_reversals_is_supported() {
 fn long_jump_left() {
     let initial = game(
         r#"
-            #######
-            #     #
-            ### @ #
-            ### ###
-            #######
+#######
+#     #
+### @ #
+### ###
+#######
         "#,
     );
     let result = initial.step(Jump).step(Left).step(Left);
     assert_level_eq(
         &result.to_ascii(),
         r#"
-            #######
-            # @   #
-            ###   #
-            ### ###
-            #######
+#######
+# @   #
+###   #
+### ###
+#######
         "#,
     );
     assert!(result.is_grounded());
@@ -100,10 +100,10 @@ fn long_jump_left() {
 fn blocked_air_movement_still_spends_airtime() {
     let initial = game(
         r#"
-            #####
-            #  ##
-            # @##
-            #####
+#####
+#  ##
+# @##
+#####
         "#,
     );
     let jumping = initial.step(Jump);
@@ -117,11 +117,11 @@ fn blocked_air_movement_still_spends_airtime() {
 fn airborne_jump_attempts_cannot_extend_airtime() {
     let initial = game(
         r#"
-            #####
-            #   #
-            #   #
-            # @ #
-            #####
+#####
+#   #
+#   #
+# @ #
+#####
         "#,
     );
     let jumping = initial.step(Jump);
@@ -135,11 +135,11 @@ fn airborne_jump_attempts_cannot_extend_airtime() {
 fn landing_on_a_ledge_ends_airtime_and_allows_another_jump() {
     let initial = game(
         r#"
-            #######
-            #     #
-            #     #
-            # @#  #
-            #######
+#######
+#     #
+#     #
+# @#  #
+#######
         "#,
     );
     let landed = initial.step(Jump).step(Right);
@@ -157,12 +157,12 @@ fn landing_on_a_ledge_ends_airtime_and_allows_another_jump() {
 fn walking_off_either_side_of_a_ledge_falls_two_tiles_immediately() {
     let initial = game(
         r#"
-            #######
-            #  @  #
-            #  #  #
-            #     #
-            #     #
-            #######
+#######
+#  @  #
+#  #  #
+#     #
+#     #
+#######
         "#,
     );
     for (input, x) in [(Left, 2), (Right, 4)] {
@@ -179,12 +179,12 @@ fn walking_off_either_side_of_a_ledge_falls_two_tiles_immediately() {
 fn falling_checks_each_tile_so_it_cannot_skip_a_platform() {
     let initial = game(
         r#"
-            #######
-            # @   #
-            # #   #
-            #  #  #
-            #     #
-            #######
+#######
+# @   #
+# #   #
+#  #  #
+#     #
+#######
         "#,
     );
     let landed = initial.step(Right);
@@ -197,14 +197,14 @@ fn falling_checks_each_tile_so_it_cannot_skip_a_platform() {
 fn after_airtime_expires_falling_continues_two_tiles_per_update() {
     let initial = game(
         r#"
-            ########
-            #      #
-            # @    #
-            # #    #
-            #      #
-            #      #
-            #      #
-            ########
+########
+#      #
+# @    #
+# #    #
+#      #
+#      #
+#      #
+########
         "#,
     );
     let falling = initial.step(Jump).step(Right).step(Right);
@@ -221,12 +221,12 @@ fn after_airtime_expires_falling_continues_two_tiles_per_update() {
 fn unsupported_player_falls_on_every_input_including_invalid_jumps() {
     let initial = game(
         r#"
-            #######
-            #  @  #
-            #     #
-            #     #
-            #     #
-            #######
+#######
+#  @  #
+#     #
+#     #
+#     #
+#######
         "#,
     );
     for (input, x) in [(Left, 2), (Right, 4), (Jump, 3), (Wait, 3)] {
@@ -240,11 +240,11 @@ fn unsupported_player_falls_on_every_input_including_invalid_jumps() {
 fn blocked_horizontal_movement_does_not_stop_falling() {
     let initial = game(
         r#"
-            #####
-            ##@##
-            #   #
-            #   #
-            #####
+#####
+##@##
+#   #
+#   #
+#####
         "#,
     );
     for input in [Left, Right] {
@@ -258,12 +258,12 @@ fn blocked_horizontal_movement_does_not_stop_falling() {
 fn blocked_jump_does_not_grant_airtime() {
     let initial = game(
         r#"
-            #####
-            # # #
-            # @ #
-            # # #
-            #   #
-            #####
+#####
+# # #
+# @ #
+# # #
+#   #
+#####
         "#,
     );
     let blocked = initial.step(Jump);
@@ -276,7 +276,13 @@ fn blocked_jump_does_not_grant_airtime() {
 
 #[test]
 fn non_wall_tiles_are_passable_and_preserved_under_the_player() {
-    let initial = game("#######\n#@GSt?#\n#######");
+    let initial = game(
+        r#"
+#######
+#@GSt?#
+#######
+"#,
+    );
     let mut current = initial;
     for (x, tile) in [
         (2, Tile::Goal),
@@ -288,15 +294,37 @@ fn non_wall_tiles_are_passable_and_preserved_under_the_player() {
         assert_eq!(current.player().position, Position { x, y: 1 });
         assert_eq!(current.level().tile_at(current.player().position), tile);
     }
-    assert_level_eq(&current.to_ascii(), "#######\n# GSt@#\n#######");
+    assert_level_eq(
+        &current.to_ascii(),
+        r#"
+#######
+# GSt@#
+#######
+"#,
+    );
     current = current.step(Left);
-    assert_level_eq(&current.to_ascii(), "#######\n# GS@?#\n#######");
+    assert_level_eq(
+        &current.to_ascii(),
+        r#"
+#######
+# GS@?#
+#######
+"#,
+    );
 }
 
 #[test]
 fn non_wall_tiles_do_not_supply_ground_support() {
     for symbol in ['G', 'S', 't', '?'] {
-        let initial = game(&format!("#####\n# @ #\n# {symbol} #\n#   #\n#####"));
+        let initial = game(&format!(
+            r#"
+#####
+# @ #
+# {symbol} #
+#   #
+#####
+"#
+        ));
         assert!(!initial.is_grounded());
         let landed = initial.step(Jump);
         assert_eq!(landed.player().position, Position { x: 2, y: 3 });
@@ -306,7 +334,14 @@ fn non_wall_tiles_do_not_supply_ground_support() {
 
 #[test]
 fn waiting_advances_airtime() {
-    let initial = game("#####\n#   #\n# @ #\n#####");
+    let initial = game(
+        r#"
+#####
+#   #
+# @ #
+#####
+"#,
+    );
     assert_eq!(initial.step(Wait), initial);
     let waiting = initial.step(Jump).step(Wait);
     assert_eq!(waiting.player().air_inputs_remaining, 1);
@@ -315,7 +350,14 @@ fn waiting_advances_airtime() {
 
 #[test]
 fn airtime_is_part_of_state_identity_even_when_the_picture_is_identical() {
-    let initial = game("#####\n#   #\n# @ #\n#####");
+    let initial = game(
+        r#"
+#####
+#   #
+# @ #
+#####
+"#,
+    );
     let jumping = initial.step(Jump);
     let waiting = jumping.step(Wait);
     assert_eq!(jumping.to_ascii(), waiting.to_ascii());
@@ -327,9 +369,9 @@ fn airtime_is_part_of_state_identity_even_when_the_picture_is_identical() {
 fn right() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            # @ #
-            #####
+#####
+# @ #
+#####
         "#,
     ))
     .unwrap();
@@ -339,9 +381,9 @@ fn right() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            #  @#
-            #####
+#####
+#  @#
+#####
         "#,
     );
 }
@@ -350,9 +392,9 @@ fn right() {
 fn left() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            # @ #
-            #####
+#####
+# @ #
+#####
         "#,
     ))
     .unwrap();
@@ -362,9 +404,9 @@ fn left() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            #@  #
-            #####
+#####
+#@  #
+#####
         "#,
     );
 }
@@ -373,10 +415,10 @@ fn left() {
 fn move_up_right() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            #   #
-            # @##
-            #####
+#####
+#   #
+# @##
+#####
         "#,
     ))
     .unwrap();
@@ -386,10 +428,10 @@ fn move_up_right() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            #  @#
-            #  ##
-            #####
+#####
+#  @#
+#  ##
+#####
         "#,
     );
 }
@@ -398,11 +440,11 @@ fn move_up_right() {
 fn long_jump_right() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            #   #
-            #@ ##
-            ## ##
-            #####
+#####
+#   #
+#@ ##
+## ##
+#####
         "#,
     ))
     .unwrap();
@@ -412,11 +454,11 @@ fn long_jump_right() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            #  @#
-            #  ##
-            ## ##
-            #####
+#####
+#  @#
+#  ##
+## ##
+#####
         "#,
     );
 }
@@ -425,10 +467,10 @@ fn long_jump_right() {
 fn move_up_left() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            #   #
-            ##@ #
-            #####
+#####
+#   #
+##@ #
+#####
         "#,
     ))
     .unwrap();
@@ -438,10 +480,10 @@ fn move_up_left() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            #@  #
-            ##  #
-            #####
+#####
+#@  #
+##  #
+#####
         "#,
     );
 }
@@ -450,9 +492,9 @@ fn move_up_left() {
 fn cant_right() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            # @##
-            #####
+#####
+# @##
+#####
         "#,
     ))
     .unwrap();
@@ -462,9 +504,9 @@ fn cant_right() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            # @##
-            #####
+#####
+# @##
+#####
         "#,
     );
 }
@@ -473,9 +515,9 @@ fn cant_right() {
 fn cant_left() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            ##@ #
-            #####
+#####
+##@ #
+#####
         "#,
     ))
     .unwrap();
@@ -485,9 +527,9 @@ fn cant_left() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            ##@ #
-            #####
+#####
+##@ #
+#####
         "#,
     );
 }
@@ -496,10 +538,10 @@ fn cant_left() {
 fn cant_move_up_right_1() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            #  ##
-            # @##
-            #####
+#####
+#  ##
+# @##
+#####
         "#,
     ))
     .unwrap();
@@ -510,10 +552,10 @@ fn cant_move_up_right_1() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            #  ##
-            # @##
-            #####
+#####
+#  ##
+# @##
+#####
         "#,
     );
 }
@@ -522,10 +564,10 @@ fn cant_move_up_right_1() {
 fn cant_move_up() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            # # #
-            # @ #
-            #####
+#####
+# # #
+# @ #
+#####
         "#,
     ))
     .unwrap();
@@ -535,10 +577,10 @@ fn cant_move_up() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            # # #
-            # @ #
-            #####
+#####
+# # #
+# @ #
+#####
         "#,
     );
 }
@@ -547,10 +589,10 @@ fn cant_move_up() {
 fn cant_move_up_left_1() {
     let game = GameState::from_ascii(&level(
         r#"
-            #####
-            ##  #
-            ##@ #
-            #####
+#####
+##  #
+##@ #
+#####
         "#,
     ))
     .unwrap();
@@ -561,10 +603,10 @@ fn cant_move_up_left_1() {
     assert_level_eq(
         &game.to_ascii(),
         r#"
-            #####
-            ##  #
-            ##@ #
-            #####
+#####
+##  #
+##@ #
+#####
         "#,
     );
 }

@@ -522,7 +522,7 @@ fn labeled_rows(labels: &str) -> Result<Vec<Vec<char>>, Box<dyn Error>> {
 fn is_label_symbol(symbol: char) -> bool {
     matches!(
         symbol,
-        ' ' | '#' | 'D' | 'P' | 'G' | 'S' | 't' | '?' | 'C' | 'O' | '@'
+        ' ' | '#' | 'D' | 'X' | 'P' | 'G' | 'S' | 't' | '?' | 'C' | 'O' | '@'
     )
 }
 

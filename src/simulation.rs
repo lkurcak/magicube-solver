@@ -97,6 +97,7 @@ pub enum Tile {
     Empty,
     Wall,
     Gate,
+    GateGoal,
     PressurePlate,
     Goal,
     Skull,
@@ -105,11 +106,22 @@ pub enum Tile {
 }
 
 impl Tile {
+    /// Whether this tile follows the pressure-plate-controlled gate rules.
+    pub const fn is_gate(self) -> bool {
+        matches!(self, Self::Gate | Self::GateGoal)
+    }
+
+    /// Whether the player's cube wins when it occupies this tile.
+    pub const fn is_goal(self) -> bool {
+        matches!(self, Self::Goal | Self::GateGoal)
+    }
+
     fn symbol(self) -> char {
         match self {
             Self::Empty => ' ',
             Self::Wall => '#',
             Self::Gate => 'D',
+            Self::GateGoal => 'X',
             Self::PressurePlate => 'P',
             Self::Goal => 'G',
             Self::Skull => 'S',
@@ -146,6 +158,10 @@ impl Level {
         } else {
             Tile::Empty
         }
+    }
+
+    pub(crate) fn has_goal(&self) -> bool {
+        self.tiles.iter().any(|tile| tile.is_goal())
     }
 }
 
@@ -225,6 +241,7 @@ impl GameState {
                     ' ' => Tile::Empty,
                     '#' => Tile::Wall,
                     'D' => Tile::Gate,
+                    'X' => Tile::GateGoal,
                     'P' => Tile::PressurePlate,
                     'G' => Tile::Goal,
                     'S' => Tile::Skull,
@@ -308,11 +325,8 @@ impl GameState {
     }
 
     fn is_solid_tile(&self, position: Position) -> bool {
-        match self.level.tile_at(position) {
-            Tile::Wall => true,
-            Tile::Gate => self.pressure_plates_active(),
-            _ => false,
-        }
+        let tile = self.level.tile_at(position);
+        tile == Tile::Wall || (tile.is_gate() && self.pressure_plates_active())
     }
 
     fn is_solid_for_cube(&self, position: Position) -> bool {
@@ -411,7 +425,7 @@ impl GameState {
         }
         if next.status == GameStatus::Playing
             && next.cubes.iter().any(|cube| {
-                cube.source == CubeSource::Player && next.level.tile_at(cube.position) == Tile::Goal
+                cube.source == CubeSource::Player && next.level.tile_at(cube.position).is_goal()
             })
         {
             next.status = GameStatus::Won;
@@ -422,7 +436,13 @@ impl GameState {
     fn blocks_projectile(&self, position: Position) -> bool {
         !matches!(
             self.level.tile_at(position),
-            Tile::Empty | Tile::Gate | Tile::PressurePlate | Tile::Goal | Tile::Skull | Tile::Torch
+            Tile::Empty
+                | Tile::Gate
+                | Tile::GateGoal
+                | Tile::PressurePlate
+                | Tile::Goal
+                | Tile::Skull
+                | Tile::Torch
         ) || self.is_solid(position)
             || position == self.player.position
     }

@@ -1,5 +1,12 @@
+mod support;
+
 use magicube_solver::GameInput::{Jump, Left, Right, Wait};
 use magicube_solver::{GameSettings, GameState};
+use support::{assert_level_eq, level};
+
+fn game(drawing: &str) -> GameState {
+    GameState::from_ascii(&level(drawing)).unwrap()
+}
 
 #[test]
 fn pushes_single_cubes_and_mixed_chains_in_both_directions() {
@@ -9,11 +16,26 @@ fn pushes_single_cubes_and_mixed_chains_in_both_directions() {
         ("#@COCC  #", Right, "# @COCC #"),
         ("#  CCOC@#", Left, "# CCOC@ #"),
     ] {
-        let map = format!("#########\n{before}\n#########");
-        let initial = GameState::from_ascii(&map).unwrap();
+        let map = format!(
+            r#"
+#########
+{before}
+#########
+"#
+        );
+        let initial = game(&map);
         let pushed = initial.step(input);
-        assert_eq!(pushed.to_ascii(), format!("#########\n{after}\n#########"));
-        assert_eq!(initial.to_ascii(), map);
+        assert_level_eq(
+            &pushed.to_ascii(),
+            &format!(
+                r#"
+#########
+{after}
+#########
+"#
+            ),
+        );
+        assert_level_eq(&initial.to_ascii(), &map);
         assert_eq!(pushed.cubes().len(), initial.cubes().len());
     }
 }
@@ -21,7 +43,13 @@ fn pushes_single_cubes_and_mixed_chains_in_both_directions() {
 #[test]
 fn wall_at_end_of_chain_blocks_the_entire_push() {
     for (row, input) in [("#@COC#", Right), ("#COC@#", Left)] {
-        let initial = GameState::from_ascii(&format!("######\n{row}\n######")).unwrap();
+        let initial = game(&format!(
+            r#"
+######
+{row}
+######
+"#
+        ));
         assert_eq!(initial.step(input), initial);
     }
 }
@@ -29,15 +57,29 @@ fn wall_at_end_of_chain_blocks_the_entire_push() {
 #[test]
 fn skull_at_end_of_chain_blocks_the_entire_push() {
     for (row, input) in [("#@COS #", Right), ("# SCO@#", Left)] {
-        let initial = GameState::from_ascii(&format!("#######\n{row}\n#######")).unwrap();
+        let initial = game(&format!(
+            r#"
+#######
+{row}
+#######
+"#
+        ));
         assert_eq!(initial.step(input), initial);
     }
 }
 
 #[test]
 fn skulls_stop_falling_cubes() {
-    let initial =
-        GameState::from_ascii("#######\n# C   #\n#     #\n# S   #\n#  @  #\n#######").unwrap();
+    let initial = game(
+        r#"
+#######
+# C   #
+#     #
+# S   #
+#  @  #
+#######
+"#,
+    );
     let fallen = initial.step(Wait);
 
     assert_eq!(fallen.cubes()[0].position.y, 2);
@@ -46,11 +88,25 @@ fn skulls_stop_falling_cubes() {
 
 #[test]
 fn cube_pushed_off_a_ledge_falls_in_the_same_update() {
-    let initial = GameState::from_ascii("#######\n#@CO  #\n####  #\n#     #\n#######").unwrap();
+    let initial = game(
+        r#"
+#######
+#@CO  #
+####  #
+#     #
+#######
+"#,
+    );
     let pushed = initial.step(Right);
-    assert_eq!(
-        pushed.to_ascii(),
-        "#######\n# @C  #\n####  #\n#   O #\n#######"
+    assert_level_eq(
+        &pushed.to_ascii(),
+        r#"
+#######
+# @C  #
+####  #
+#   O #
+#######
+"#,
     );
 }
 
@@ -58,25 +114,57 @@ fn cube_pushed_off_a_ledge_falls_in_the_same_update() {
 fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
     for (map, input, dx, jump) in [
         (
-            "########\n#@CO   #\n#      #\n#      #\n########",
+            r#"
+########
+#@CO   #
+#      #
+#      #
+########
+"#,
             Right,
             1,
             false,
         ),
         (
-            "########\n#   OC@#\n#      #\n#      #\n########",
+            r#"
+########
+#   OC@#
+#      #
+#      #
+########
+"#,
             Left,
             -1,
             false,
         ),
-        ("########\n# CO   #\n#@##   #\n########", Right, 1, true),
-        ("########\n#   OC #\n#   ##@#\n########", Left, -1, true),
+        (
+            r#"
+########
+# CO   #
+#@##   #
+########
+"#,
+            Right,
+            1,
+            true,
+        ),
+        (
+            r#"
+########
+#   OC #
+#   ##@#
+########
+"#,
+            Left,
+            -1,
+            true,
+        ),
     ] {
         for allow_airborne_pushing in [false, true] {
             // Shooting and pushing can be enabled independently.
             for allow_airborne_shooting in [false, true] {
                 let initial = GameState::from_ascii_with_settings(
-                    map,
+                    &level(map),
                     GameSettings {
                         allow_airborne_shooting,
                         allow_airborne_pushing,
@@ -115,8 +203,14 @@ fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
 #[test]
 fn standing_on_either_cube_kind_supplies_support_for_pushing() {
     for cube in ['C', 'O'] {
-        let initial =
-            GameState::from_ascii(&format!("#######\n# @C  #\n# {cube}#  #\n#######")).unwrap();
+        let initial = game(&format!(
+            r#"
+#######
+# @C  #
+# {cube}#  #
+#######
+"#
+        ));
         assert!(initial.is_grounded());
         assert_eq!(initial.step(Right).player().position.x, 3);
     }
@@ -126,7 +220,14 @@ fn standing_on_either_cube_kind_supplies_support_for_pushing() {
 fn airborne_setting_does_not_allow_pushing_chains_through_walls() {
     for (row, input) in [("#@COC#", Right), ("#COC@#", Left)] {
         let initial = GameState::from_ascii_with_settings(
-            &format!("######\n{row}\n#    #\n######"),
+            &level(&format!(
+                r#"
+######
+{row}
+#    #
+######
+"#
+            )),
             GameSettings {
                 allow_airborne_pushing: true,
                 ..GameSettings::default()

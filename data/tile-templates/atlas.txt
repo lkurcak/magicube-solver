@@ -14,4 +14,5 @@ C ../tiles-manual/cube.png
 C ../tiles-manual/cube2.png
 D ../tiles-manual/gate.png
 D ../tiles-manual/gate2.png
+X ../tiles-manual/gate-and-goal.png
 P ../tiles-manual/pressure_plate.png

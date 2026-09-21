@@ -475,7 +475,15 @@ mod tests {
             name: format!("Level {id}"),
             listed: true,
             screenshot_present: true,
-            map: clean.then(|| "#####\n#@G##\n#####".to_owned()),
+            map: clean.then(|| {
+                r#"
+#####
+#@G##
+#####
+"#
+                .trim_matches('\n')
+                .to_owned()
+            }),
             width: clean.then_some(5),
             height: clean.then_some(3),
             unknown_tiles: usize::from(!clean),

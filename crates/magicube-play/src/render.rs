@@ -4,7 +4,7 @@ use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
-use magicube_solver::{GameInput, GameSettings, GameState, GameStatus, PlayerMode, Position, Tile};
+use magicube_solver::{GameInput, GameSettings, GameState, GameStatus, PlayerMode, Position};
 
 use crate::app::App;
 use crate::replay::Replay;
@@ -277,9 +277,11 @@ fn draw_board(
                 '#' => Color::Grey,
                 'D' if state.pressure_plates_active() => Color::White,
                 'D' => Color::DarkGrey,
+                'X' if state.pressure_plates_active() => Color::White,
+                'X' => Color::Green,
                 'P' => Color::Yellow,
                 'C' => Color::Blue,
-                'O' if level.tile_at(position) == Tile::Goal => Color::Green,
+                'O' if level.tile_at(position).is_goal() => Color::Green,
                 'O' => Color::Magenta,
                 '<' | '>' => Color::Yellow,
                 'G' => Color::Green,
@@ -351,7 +353,15 @@ mod tests {
 
     #[test]
     fn small_or_zero_size_terminals_render_without_advancing_the_game() {
-        let initial = GameState::from_ascii("###\n#@#\n###").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+###
+#@#
+###
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let app = App::new(initial.clone());
         for size in [(0, 0), (1, 1), (10, 6), (2, 7), (80, 24)] {
             let mut buffer = Vec::new();
@@ -362,7 +372,16 @@ mod tests {
 
     #[test]
     fn replay_renders_cursor_inputs_and_controls_without_advancing() {
-        let initial = GameState::from_ascii("########\n#      #\n#@  G###\n########").unwrap();
+        let initial = GameState::from_ascii(
+            r#"
+########
+#      #
+#@  G###
+########
+"#
+            .trim_matches('\n'),
+        )
+        .unwrap();
         let mut replay = Replay::new(
             initial,
             vec![GameInput::Shoot, GameInput::Right, GameInput::Wait],

@@ -432,7 +432,12 @@ mod tests {
 
     #[test]
     fn successful_cache_is_replayed_but_failures_require_exact_fingerprint() {
-        let map = "#####\n#@G##\n#####";
+        let map = r#"
+#####
+#@G##
+#####
+"#
+        .trim_matches('\n');
         let result = SolveResult {
             outcome: SolveOutcome::Solved(vec![GameInput::Shoot, GameInput::Right]),
             stats: SolveStats {
@@ -446,7 +451,18 @@ mod tests {
             record.solved_inputs_for(map),
             Some(vec![GameInput::Shoot, GameInput::Right])
         );
-        assert!(record.solved_inputs_for("#####\n#@###\n#####").is_none());
+        assert!(
+            record
+                .solved_inputs_for(
+                    r#"
+#####
+#@###
+#####
+"#
+                    .trim_matches('\n')
+                )
+                .is_none()
+        );
 
         let failed = SolverCacheRecord {
             outcome: CachedSolveOutcome::StateLimitReached,

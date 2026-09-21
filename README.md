@@ -141,10 +141,12 @@ grounded-only rules, regardless of the manual-play toggles. During gameplay,
 
 The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
-`P` is a pressure plate and `D` is a gate. Gates are normally passable, but become
-solid while the player or either kind of cube occupies a pressure plate.
+`P` is a pressure plate, `D` is a gate, and `X` combines a gate with a goal.
+Gates are normally passable, but become solid while the player or either kind of
+cube occupies a pressure plate.
 A falling cube crushing the player forces undo or restart before further play.
-Place your `O` cube on `G` to win; the victory screen supports undo and restart too.
+Place your `O` cube on `G` or `X` to win; the victory screen supports undo and
+restart too.
 The view follows the
 player when the level is larger than the terminal or the player leaves the map.
 The terminal is restored on exit, errors, and panics. Run
@@ -390,8 +392,9 @@ This lets stacks fall together and prevents cubes from skipping through platform
 skulls, or the player. Newly spawned cubes participate in gravity immediately. A cube
 entering the player's tile causes game over; further simulation inputs do nothing.
 
-`G` is a nonsolid target and does not stop players, cubes, or projectiles. At the
-end of an update, the player's `O` cube occupying a goal wins the level, whether
+`G` is a nonsolid target and does not stop players, cubes, or projectiles. `X` is
+both a goal and a gate, so its passability follows the pressure-plate gate rules.
+At the end of an update, the player's `O` cube occupying either goal wins, whether
 it arrived by spawning, pushing, or falling. A map cube or the player reaching
 the goal does not win. Winning freezes the state until undo or restart.
 
@@ -401,5 +404,5 @@ passable for players and projectiles but act as walls for cubes. `to_ascii()`
 renders only the original map rectangle, so use `player().position` to inspect a
 player outside it.
 Maps require exactly one `@` and can include map cubes (`C`), at most one existing
-player cube (`O`), gates (`D`), and pressure plates (`P`). Ragged rows are padded
-with empty tiles, matching the screenshot importer's format.
+player cube (`O`), gates (`D`), gate-goals (`X`), and pressure plates (`P`). Ragged
+rows are padded with empty tiles, matching the screenshot importer's format.

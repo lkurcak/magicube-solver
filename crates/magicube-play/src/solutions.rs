@@ -339,7 +339,13 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let map = "########\n#      #\n#@  G###\n########\n";
+        let map = r#"
+########
+#      #
+#@  G###
+########
+"#
+        .trim_start_matches('\n');
         let mut app = App::new(GameState::from_ascii(map).unwrap());
         for input in [GameInput::Jump, GameInput::Right, GameInput::Wait] {
             app.apply(Command::Step(input));
@@ -430,7 +436,13 @@ mod tests {
 
     #[test]
     fn loads_empty_partial_aiming_recovering_winning_and_game_over_attempts() {
-        let map = "########\n#      #\n#@  G###\n########";
+        let map = r#"
+########
+#      #
+#@  G###
+########
+"#
+        .trim_matches('\n');
         for (inputs, status) in [
             (vec![], "in_progress"),
             (vec!["shoot"], "in_progress"),
@@ -442,14 +454,33 @@ mod tests {
             assert_eq!(replay.len(), inputs.len());
             assert_eq!(replay.state(), &GameState::from_ascii(map).unwrap());
         }
-        let death = record("#####\n# C #\n# @ #\n#####", &["wait"], "game_over");
+        let death = record(
+            r#"
+#####
+# C #
+# @ #
+#####
+"#
+            .trim_matches('\n'),
+            &["wait"],
+            "game_over",
+        );
         let (_, replay) = decode(&serde_json::to_vec(&death).unwrap()).unwrap();
         assert_eq!(replay.final_state().status(), GameStatus::GameOver);
     }
 
     #[test]
     fn rejects_corrupt_unsupported_or_inconsistent_records() {
-        let valid = record("#####\n#@G##\n#####", &["shoot", "right"], "won");
+        let valid = record(
+            r#"
+#####
+#@G##
+#####
+"#
+            .trim_matches('\n'),
+            &["shoot", "right"],
+            "won",
+        );
         let mut cases = Vec::new();
         let mut version = valid.clone();
         version["format_version"] = 99.into();
@@ -507,7 +538,13 @@ mod tests {
 
     #[test]
     fn recorded_rules_control_airborne_shots_and_legacy_saves_keep_old_behavior() {
-        let map = "#####\n# G##\n#@###\n#####";
+        let map = r#"
+#####
+# G##
+#@###
+#####
+"#
+        .trim_matches('\n');
         let inputs = ["jump", "shoot", "right"];
         let mut fun = record(map, &inputs, "won");
         fun["settings"]["allow_airborne_shooting"] = true.into();
@@ -535,7 +572,13 @@ mod tests {
 
     #[test]
     fn recorded_pushing_rules_and_legacy_versions_reproduce_airborne_pushes() {
-        let map = "#######\n#@OG###\n# ### #\n#######";
+        let map = r#"
+#######
+#@OG###
+# ### #
+#######
+"#
+        .trim_matches('\n');
         for version in [1, 2, 3, 4] {
             for allow_airborne_pushing in [false, true] {
                 let mut saved = record(map, &["right"], "won");
@@ -583,7 +626,13 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let map = "#######\n#@OG###\n# ### #\n#######";
+        let map = r#"
+#######
+#@OG###
+# ### #
+#######
+"#
+        .trim_matches('\n');
         for allow_airborne_shooting in [false, true] {
             for allow_airborne_pushing in [false, true] {
                 let settings = GameSettings {
@@ -636,7 +685,13 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let map = "#####\n# G##\n#@###\n#####";
+        let map = r#"
+#####
+# G##
+#@###
+#####
+"#
+        .trim_matches('\n');
         let initial = GameState::from_ascii_with_settings(
             map,
             GameSettings {
@@ -677,7 +732,12 @@ mod tests {
                 .unwrap()
                 .as_nanos(),
         ));
-        let map = "#####\n#@G##\n#####";
+        let map = r#"
+#####
+#@G##
+#####
+"#
+        .trim_matches('\n');
         let empty = list_for_level(map, Some(&directory)).unwrap();
         assert!(empty.entries.is_empty());
         assert_eq!(empty.directory, directory);
@@ -712,7 +772,17 @@ mod tests {
         }
         fs::write(
             directory.join("unrelated.json"),
-            serde_json::to_vec(&record("###\n#@#\n###", &[], "in_progress")).unwrap(),
+            serde_json::to_vec(&record(
+                r#"
+###
+#@#
+###
+"#
+                .trim_matches('\n'),
+                &[],
+                "in_progress",
+            ))
+            .unwrap(),
         )
         .unwrap();
         fs::write(directory.join("broken.json"), b"not json").unwrap();
