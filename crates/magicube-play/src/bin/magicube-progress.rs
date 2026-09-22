@@ -76,6 +76,9 @@ struct Dashboard {
     rows: Vec<LevelRow>,
     expected_count: usize,
     selected: usize,
+    /// First visible table row, kept between frames so the table only scrolls
+    /// when the selection would leave the viewport.
+    table_offset: usize,
     finished: bool,
     message: String,
 }
@@ -86,6 +89,7 @@ impl Dashboard {
             rows: Vec::new(),
             expected_count: 0,
             selected: 0,
+            table_offset: 0,
             finished: false,
             message: "Reading trusted inputs…".to_owned(),
         }
@@ -175,7 +179,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     terminal.clear()?;
     loop {
         drain_events(&receiver, &mut dashboard);
-        terminal.draw(|frame| draw(frame, &dashboard))?;
+        terminal.draw(|frame| draw(frame, &mut dashboard))?;
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
@@ -311,7 +315,7 @@ fn stats(record: &SolverCacheRecord) -> SolveStats {
     }
 }
 
-fn draw(frame: &mut Frame, dashboard: &Dashboard) {
+fn draw(frame: &mut Frame, dashboard: &mut Dashboard) {
     let areas = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(8),
@@ -394,8 +398,10 @@ fn draw(frame: &mut Frame, dashboard: &Dashboard) {
     .row_highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
     .highlight_symbol("> ");
     let mut state = TableState::default()
-        .with_selected((!dashboard.rows.is_empty()).then_some(dashboard.selected));
+        .with_selected((!dashboard.rows.is_empty()).then_some(dashboard.selected))
+        .with_offset(dashboard.table_offset);
     frame.render_stateful_widget(table, areas[1], &mut state);
+    dashboard.table_offset = state.offset();
 
     let detail = dashboard.selected().map_or_else(
         || Text::from(dashboard.message.clone()),
@@ -536,7 +542,7 @@ mod tests {
         for size in [(40, 12), (80, 24), (120, 35)] {
             let backend = TestBackend::new(size.0, size.1);
             let mut terminal = Terminal::new(backend).unwrap();
-            terminal.draw(|frame| draw(frame, &dashboard)).unwrap();
+            terminal.draw(|frame| draw(frame, &mut dashboard)).unwrap();
             let text = terminal
                 .backend()
                 .buffer()

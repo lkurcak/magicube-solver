@@ -28,12 +28,19 @@ enum Action {
 #[derive(Debug)]
 struct Selection {
     index: usize,
+    /// First visible row, kept between frames so the list only scrolls when
+    /// the selection would leave the viewport.
+    offset: usize,
     count: usize,
 }
 
 impl Selection {
     fn new(count: usize) -> Self {
-        Self { index: 0, count }
+        Self {
+            index: 0,
+            offset: 0,
+            count,
+        }
     }
 
     fn handle_level_key(&mut self, key: KeyEvent, levels: &[BundledLevel]) -> Action {
@@ -164,6 +171,7 @@ fn select_level(
                 frame,
                 levels,
                 selection.index,
+                &mut selection.offset,
                 solve,
                 play_settings,
                 message,
@@ -199,6 +207,7 @@ fn browse_saved(
                         level.name,
                         &attempts,
                         selection.index,
+                        &mut selection.offset,
                         message.as_deref(),
                     )
                 })?;
@@ -226,6 +235,7 @@ fn draw(
     frame: &mut Frame,
     levels: &[BundledLevel],
     selected: usize,
+    offset: &mut usize,
     solve: bool,
     play_settings: GameSettings,
     message: Option<&str>,
@@ -299,7 +309,7 @@ fn draw(
         })
         .split(inner);
 
-    draw_list(frame, chunks[0], levels, selected);
+    draw_list(frame, chunks[0], levels, selected, offset);
     if let Some(level) = levels.get(selected) {
         draw_preview(frame, chunks[1], *level);
     }
@@ -310,6 +320,7 @@ fn draw_saved(
     level: &str,
     attempts: &solutions::SavedAttempts,
     selected: usize,
+    offset: &mut usize,
     message: Option<&str>,
 ) {
     let outer = Block::default()
@@ -342,8 +353,11 @@ fn draw_saved(
             .block(Block::default().title(" Newest first "))
             .highlight_symbol("> ")
             .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan));
-        let mut state = ListState::default().with_selected(Some(selected));
+        let mut state = ListState::default()
+            .with_selected(Some(selected))
+            .with_offset(*offset);
         frame.render_stateful_widget(list, sections[0], &mut state);
+        *offset = state.offset();
     }
     let footer = Paragraph::new(vec![
         Line::from(format!("Directory: {}", attempts.directory.display())),
@@ -359,7 +373,13 @@ fn draw_saved(
     frame.render_widget(footer, sections[1]);
 }
 
-fn draw_list(frame: &mut Frame, area: Rect, levels: &[BundledLevel], selected: usize) {
+fn draw_list(
+    frame: &mut Frame,
+    area: Rect,
+    levels: &[BundledLevel],
+    selected: usize,
+    offset: &mut usize,
+) {
     let items = levels
         .iter()
         .map(|level| {
@@ -384,8 +404,11 @@ fn draw_list(frame: &mut Frame, area: Rect, levels: &[BundledLevel], selected: u
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         );
-    let mut state = ListState::default().with_selected((!levels.is_empty()).then_some(selected));
+    let mut state = ListState::default()
+        .with_selected((!levels.is_empty()).then_some(selected))
+        .with_offset(*offset);
     frame.render_stateful_widget(list, area, &mut state);
+    *offset = state.offset();
 }
 
 fn draw_preview(frame: &mut Frame, area: Rect, level: BundledLevel) {
@@ -467,7 +490,17 @@ mod tests {
             let mut terminal = Terminal::new(backend).unwrap();
             for solve in [false, true] {
                 terminal
-                    .draw(|frame| draw(frame, &levels, 0, solve, GameSettings::default(), None))
+                    .draw(|frame| {
+                        draw(
+                            frame,
+                            &levels,
+                            0,
+                            &mut 0,
+                            solve,
+                            GameSettings::default(),
+                            None,
+                        )
+                    })
                     .unwrap();
             }
         }
@@ -500,6 +533,36 @@ mod tests {
     }
 
     #[test]
+    fn list_scrolls_only_when_selection_leaves_the_viewport() {
+        let levels = [BundledLevel {
+            id: "1",
+            name: "Level",
+            map: Some("#@G"),
+            issues: &[],
+        }; 20];
+        // Borders leave five visible rows.
+        let mut terminal = Terminal::new(TestBackend::new(20, 7)).unwrap();
+        let mut offset = 0;
+        let mut render = |selected, offset: &mut usize| {
+            terminal
+                .draw(|frame| draw_list(frame, frame.area(), &levels, selected, offset))
+                .unwrap();
+        };
+        for selected in 0..=9 {
+            render(selected, &mut offset);
+        }
+        assert_eq!(offset, 5);
+        // Moving up within the viewport keeps the view still.
+        render(8, &mut offset);
+        assert_eq!(offset, 5);
+        render(5, &mut offset);
+        assert_eq!(offset, 5);
+        // Moving above the top edge scrolls by one row.
+        render(4, &mut offset);
+        assert_eq!(offset, 4);
+    }
+
+    #[test]
     fn corrupted_and_empty_catalogs_render_with_or_without_previews() {
         for map in [Some("#@G?"), None] {
             let levels = [BundledLevel {
@@ -514,7 +577,15 @@ mod tests {
                     for solve in [false, true] {
                         terminal
                             .draw(|frame| {
-                                draw(frame, entries, 0, solve, GameSettings::default(), None)
+                                draw(
+                                    frame,
+                                    entries,
+                                    0,
+                                    &mut 0,
+                                    solve,
+                                    GameSettings::default(),
+                                    None,
+                                )
                             })
                             .unwrap();
                     }
@@ -546,6 +617,7 @@ mod tests {
             magicube_solver::GameState::from_ascii(level.playable_map().unwrap()).unwrap();
             let mut selection = Selection {
                 index,
+                offset: 0,
                 count: crate::BUNDLED_LEVELS.len(),
             };
             for (code, action) in [
@@ -613,6 +685,7 @@ mod tests {
                             "Level 1",
                             &attempts,
                             0,
+                            &mut 0,
                             Some("Cannot load this saved attempt"),
                         )
                     })
