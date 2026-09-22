@@ -111,32 +111,8 @@ fn cube_pushed_off_a_ledge_falls_in_the_same_update() {
 }
 
 #[test]
-fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
-    for (map, input, dx, jump) in [
-        (
-            r#"
-########
-#@CO   #
-#      #
-#      #
-########
-"#,
-            Right,
-            1,
-            false,
-        ),
-        (
-            r#"
-########
-#   OC@#
-#      #
-#      #
-########
-"#,
-            Left,
-            -1,
-            false,
-        ),
+fn airborne_pushes_of_supported_cubes_require_opt_in() {
+    for (map, input, dx) in [
         (
             r#"
 ########
@@ -146,7 +122,6 @@ fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
 "#,
             Right,
             1,
-            true,
         ),
         (
             r#"
@@ -157,7 +132,6 @@ fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
 "#,
             Left,
             -1,
-            true,
         ),
     ] {
         for allow_airborne_pushing in [false, true] {
@@ -172,7 +146,7 @@ fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
                     },
                 )
                 .unwrap();
-                let airborne = if jump { initial.step(Jump) } else { initial };
+                let airborne = initial.step(Jump);
                 assert!(!airborne.is_grounded());
                 let next = airborne.step(input);
                 let moved = if allow_airborne_pushing { dx } else { 0 };
@@ -183,19 +157,46 @@ fn airborne_pushes_require_opt_in_during_both_jumps_and_falls() {
                 for (before, after) in airborne.cubes().iter().zip(next.cubes()) {
                     assert_eq!(after.position.x, before.position.x + moved);
                 }
-                if jump {
-                    // A successful push lands on the ledge under the cube;
-                    // a blocked push instead spends one of the two air inputs.
-                    assert_eq!(
-                        next.player().air_inputs_remaining,
-                        if allow_airborne_pushing { 0 } else { 1 }
-                    );
-                    assert_eq!(next.step(Wait).player().air_inputs_remaining, 0);
-                } else {
-                    assert_eq!(next.player().position.y, airborne.player().position.y + 2);
-                }
+                // A successful push lands on the ledge under the cube; a
+                // blocked push instead spends one of the two air inputs.
+                assert_eq!(
+                    next.player().air_inputs_remaining,
+                    if allow_airborne_pushing { 0 } else { 1 }
+                );
+                assert_eq!(next.step(Wait).player().air_inputs_remaining, 0);
                 assert_eq!(next.settings(), airborne.settings());
             }
+        }
+    }
+}
+
+#[test]
+fn falling_cubes_cannot_be_pushed_even_with_airborne_pushing_enabled() {
+    for cube in ['C', 'O'] {
+        for allow_airborne_pushing in [false, true] {
+            let initial = GameState::from_ascii_with_settings(
+                &level(&format!(
+                    r#"
+########
+# @{}   #
+# #    #
+#      #
+########
+"#,
+                    cube
+                )),
+                GameSettings {
+                    allow_airborne_pushing,
+                    ..GameSettings::default()
+                },
+            )
+            .unwrap();
+            assert!(initial.is_grounded());
+
+            let blocked = initial.step(Right);
+            assert_eq!(blocked.player().position.x, initial.player().position.x);
+            assert_eq!(blocked.cubes()[0].position.x, initial.cubes()[0].position.x);
+            assert_eq!(blocked.cubes()[0].position.y, 3);
         }
     }
 }

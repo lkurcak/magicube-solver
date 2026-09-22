@@ -412,6 +412,50 @@ fn standing_on_either_cube_kind_allows_a_grounded_shot() {
 }
 
 #[test]
+fn falling_cubes_do_not_enable_grounded_shots() {
+    for cube in ['C', 'O'] {
+        let map = level(&format!(
+            r#"
+#######
+# @   #
+# {cube}   #
+#     #
+#     #
+#     #
+#######
+"#
+        ));
+        let initial = GameState::from_ascii(&map).unwrap();
+        assert!(!initial.is_grounded());
+        assert!(!initial.can_shoot());
+        assert_eq!(initial.step(Shoot), initial);
+
+        let falling = initial.step(Wait);
+        assert_eq!(falling.player().position, Position { x: 2, y: 3 });
+        assert_eq!(falling.cubes()[0].position, Position { x: 2, y: 4 });
+        assert!(!falling.is_grounded());
+        assert_eq!(falling.step(Shoot), falling);
+
+        let landed = falling.step(Wait);
+        assert!(landed.is_grounded());
+        assert!(landed.can_shoot());
+        assert_eq!(landed.step(Shoot).player().mode, PlayerMode::Aiming);
+
+        let fun = GameState::from_ascii_with_settings(
+            &map,
+            GameSettings {
+                allow_airborne_shooting: true,
+                ..GameSettings::default()
+            },
+        )
+        .unwrap();
+        assert!(!fun.is_grounded());
+        assert!(fun.can_shoot());
+        assert_eq!(fun.step(Shoot).player().mode, PlayerMode::Aiming);
+    }
+}
+
+#[test]
 fn a_new_shot_removes_only_the_player_cube_and_new_cubes_fall_immediately() {
     let initial = game(
         r#"

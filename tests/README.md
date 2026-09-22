@@ -7,8 +7,8 @@ player, and screenshot importer tests.
 jump and gravity checks. `simulation_maps.rs` covers parsing imported maps and
 open map edges. `shooting.rs` covers aiming, shot recovery, projectile collisions, cube ownership,
 falling, crushing, default grounded-only shots, and optional airborne shots.
-`pushing.rs` covers cube chains, blocked pushes, pushing off ledges, grounded-only
-defaults, and independent airborne-pushing opt-in during jumps and falls.
+`pushing.rs` covers cube chains, blocked and falling cubes, pushing off ledges,
+grounded-only defaults, and independent airborne-pushing opt-in during jumps.
 `goals.rs` covers passable positions above solid pedestals and winning with the
 player's cube.
 `solutions.rs` replays saved solutions for levels 1–7, solves each with the default

@@ -120,8 +120,9 @@ levels and files still work. It uses the normal solutions directory, including
 any `--solutions-dir` override. Browsing an empty directory does not create it.
 Passing a level file on the command line skips the selector.
 
-By default, aiming, firing, and pushing cubes require ground support, including
-standing on another cube. Pressing X without support does nothing and does not
+By default, aiming, firing, and pushing cubes require stable ground support,
+including standing on a cube that is itself supported. A falling cube does not
+provide ground support. Pressing X without support does nothing and does not
 advance time. A blocked airborne push still advances time and gravity; walking
 through empty space in midair remains allowed.
 For fun, toggle airborne shooting with **F** or airborne pushing with **P** in
@@ -132,7 +133,8 @@ cargo run -p magicube-play -- --airborne-shooting
 cargo run -p magicube-play -- --airborne-pushing
 ```
 
-These independent options permit shots or pushes throughout jumps and falls.
+These independent options permit shots or pushes throughout the player's jumps
+and falls. Falling cubes themselves cannot be pushed.
 They apply to manual play for the session and are preserved by undo and restart.
 You can also combine the flags with a level-file path. The game and replay
 headers show both active rules. **S** and `--solve` always solve with the default
@@ -295,7 +297,8 @@ wait. Returned inputs replay directly through `GameState::step`.
 and pushing disabled. The library search follows its initial state's rules; deliberately
 searching a fun variant requires constructing that state with
 `GameState::from_ascii_with_settings(map, GameSettings { allow_airborne_shooting: true, ..GameSettings::default() })`.
-Use `allow_airborne_pushing: true` to opt into airborne pushing independently.
+Use `allow_airborne_pushing: true` to opt into pushing stable cubes while the
+player is airborne independently.
 The terminal's solver entry points always construct the default state.
 
 The default cap is one million distinct retained states, including the initial
@@ -346,14 +349,16 @@ Movement updates work as follows:
 
 - Left/right attempt to move one tile. `#` walls, `G` goal pedestals, `P`
   pressure-plate bases, closed `D` gates, and both kinds of cube are solid
-  and support the player. Walking into a cube pushes the entire contiguous row
+  and block the player. A cube supports the player only when its vertical stack
+  is itself supported. Walking into a cube pushes the entire contiguous row
   of cubes one tile, provided the player is grounded and the space beyond it is
-  not solid. `allow_airborne_pushing` removes only the support requirement.
+  not solid. Falling cubes cannot be pushed; `allow_airborne_pushing` removes
+  only the player's support requirement.
   There is no limit on chain length, and a wall blocks the whole push.
   Pushed cubes then fall normally.
   Skulls block cubes but not the player. Torches and unknown tiles do not block
   player or cube movement.
-- Jump requires solid support immediately below and free space above. It rises one tile
+- Jump requires stable ground support below and free space above. It rises one tile
   and grants two subsequent air inputs. Left/right and waiting spend those inputs;
   blocked moves and ignored airborne jump attempts also consume time.
 - Gravity resumes after movement on the second air input. Without airtime, every

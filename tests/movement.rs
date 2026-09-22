@@ -351,6 +351,32 @@ fn feature_bases_are_solid_and_supply_ground_support() {
 }
 
 #[test]
+fn falling_cube_stacks_supply_support_only_after_landing() {
+    let initial = game(
+        r#"
+#######
+# @   #
+# C   #
+# O   #
+#     #
+#     #
+#     #
+#######
+"#,
+    );
+    assert!(!initial.is_grounded());
+
+    let falling = initial.step(Wait);
+    assert_eq!(falling.player().position, Position { x: 2, y: 3 });
+    assert!(!falling.is_grounded());
+
+    let landed = falling.step(Wait);
+    assert_eq!(landed.player().position, Position { x: 2, y: 4 });
+    assert!(landed.is_grounded());
+    assert_eq!(landed.player().air_inputs_remaining, 0);
+}
+
+#[test]
 fn waiting_advances_airtime() {
     let initial = game(
         r#"

@@ -73,10 +73,10 @@ pub enum GameStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GameSettings {
     /// Fun mode: allow firing without support, including during jump airtime.
-    /// The default requires solid support immediately below the player.
+    /// The default requires stable ground support below the player.
     pub allow_airborne_shooting: bool,
-    /// Fun mode: allow pushing cubes during jumps and falls.
-    /// The default requires solid support immediately below the player.
+    /// Fun mode: allow pushing stable cubes during player jumps and falls.
+    /// The default requires stable ground support below the player.
     pub allow_airborne_pushing: bool,
     /// Maximum number of tiles a projectile traverses during one update.
     pub projectile_tiles_per_update: usize,
@@ -320,8 +320,8 @@ impl GameState {
         self.status
     }
 
-    /// Walls, feature bases, closed gates, and both kinds of cube are solid and
-    /// supply ground support.
+    /// Walls, feature bases, closed gates, and both kinds of cube are solid.
+    /// A cube supplies ground support only when it is itself stably supported.
     pub fn is_solid(&self, position: Position) -> bool {
         self.is_solid_tile(position) || self.cubes.iter().any(|cube| cube.position == position)
     }
@@ -382,7 +382,41 @@ impl GameState {
     }
 
     fn is_grounded_ignoring_plate_cube(&self, ignored_cube: Option<usize>) -> bool {
-        self.is_solid_ignoring_plate_cube(self.player.position.offset(0, 1), ignored_cube)
+        let support = self.player.position.offset(0, 1);
+        if self.is_solid_tile_ignoring_plate_cube(support, ignored_cube) {
+            return true;
+        }
+        self.cubes
+            .iter()
+            .position(|cube| cube.position == support)
+            .is_some_and(|index| self.cube_is_grounded_ignoring_plate_cube(index, ignored_cube))
+    }
+
+    fn cube_is_grounded_ignoring_plate_cube(
+        &self,
+        cube: usize,
+        ignored_cube: Option<usize>,
+    ) -> bool {
+        let mut support = self
+            .level
+            .wrap_below(self.cubes[cube].position.offset(0, 1));
+        // Cubes remain solid collision bodies while falling, but they provide
+        // ground support only when the whole vertical stack is stable. Follow
+        // the stack until it reaches terrain that blocks the bottom cube.
+        // The bounded loop also handles a wrapped column of mutually supporting
+        // cubes, which cannot move under the same gravity collision rules.
+        for _ in 0..=self.cubes.len() {
+            if self.is_solid_tile_ignoring_plate_cube(support, ignored_cube)
+                || self.level.tile_at(support) == Tile::Skull
+            {
+                return true;
+            }
+            let Some(cube) = self.cubes.iter().find(|cube| cube.position == support) else {
+                return false;
+            };
+            support = self.level.wrap_below(cube.position.offset(0, 1));
+        }
+        true
     }
 
     /// Whether the rules allow aiming/firing at the current position. The shot
@@ -658,7 +692,9 @@ impl GameState {
             }
             match self.cubes.iter().position(|cube| cube.position == target) {
                 Some(index) => {
-                    if !self.settings.allow_airborne_pushing && !self.is_grounded() {
+                    if !self.cube_is_grounded_ignoring_plate_cube(index, None)
+                        || (!self.settings.allow_airborne_pushing && !self.is_grounded())
+                    {
                         return false;
                     }
                     chain.push(index);
