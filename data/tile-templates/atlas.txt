@@ -3,6 +3,7 @@ anchor # ../tiles-manual/wall.png
 # ../tiles-manual/wall2.png
 # ../tiles-manual/wall3.png
 # ../tiles-manual/wall4.png
+# ../tiles-manual/wall5.png
 G ../tiles-manual/pedestal.png
 @ ../tiles-manual/player.png
 _ ../tiles-manual/goal.png
@@ -17,6 +18,7 @@ C ../tiles-manual/cube2.png
 C ../tiles-manual/cube3.png
 D ../tiles-manual/gate.png
 D ../tiles-manual/gate2.png
+D ../tiles-manual/gate3.png
 D ../tiles-manual/gate-closed.png
 D ../tiles-manual/gate-and-goal.png
 D ../tiles-manual/gate-and-goal2.png

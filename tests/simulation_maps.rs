@@ -121,33 +121,23 @@ fn rejects_empty_maps_missing_or_multiple_players_and_invalid_symbols() {
 }
 
 #[test]
-fn outside_the_map_is_empty_and_does_not_grant_a_jump() {
+fn falling_below_the_level_wraps_to_the_top() {
     let initial = GameState::from_ascii(&level(
         r#"
-@
+  @
+
+
+t
 "#,
     ))
     .unwrap();
-    assert!(!initial.is_grounded());
-    for (input, x) in [
-        (GameInput::Left, -1),
-        (GameInput::Right, 1),
-        (GameInput::Jump, 0),
-    ] {
-        let falling = initial.step(input);
-        assert_eq!(falling.player().position, Position { x, y: 2 });
-        assert_eq!(falling.player().air_inputs_remaining, 0);
-        assert!(!falling.is_grounded());
-        assert_eq!(falling.to_ascii(), "");
-        assert_eq!(
-            falling.step(GameInput::Wait).player().position,
-            Position { x, y: 4 }
-        );
-    }
+    let wrapped = initial.step(GameInput::Wait).step(GameInput::Wait);
+    assert_eq!(wrapped.player().position, Position { x: 2, y: 0 });
+    assert!(wrapped.player().position.y < wrapped.level().height() as isize);
 }
 
 #[test]
-fn jump_can_rise_above_the_drawing_without_an_implicit_ceiling() {
+fn jumping_above_the_level_does_not_wrap_or_repeat_the_map() {
     let initial = GameState::from_ascii(&level(
         r#"
 @
@@ -158,8 +148,19 @@ fn jump_can_rise_above_the_drawing_without_an_implicit_ceiling() {
     let jumping = initial.step(GameInput::Jump);
     assert_eq!(jumping.player().position, Position { x: 0, y: -1 });
     assert_eq!(
-        jumping.level().tile_at(jumping.player().position),
+        jumping.level().tile_at(Position { x: 0, y: -1 }),
+        Tile::Empty
+    );
+    assert_eq!(
+        jumping.level().tile_at(Position { x: 0, y: 2 }),
         Tile::Empty
     );
     assert_eq!(jumping.step(GameInput::Wait).step(GameInput::Wait), initial);
+}
+
+#[test]
+fn falling_cubes_wrap_to_the_top() {
+    let initial = GameState::from_ascii("@ \n  \n C").unwrap();
+    let fallen = initial.step(GameInput::Wait);
+    assert_eq!(fallen.cubes()[0].position, Position { x: 1, y: 1 });
 }

@@ -306,9 +306,9 @@ return `Unsolvable`, regardless of the cap; both require no search.
 
 `Unsolvable` means the reachable search space was exhausted (or the initial state
 was game over). `StateLimitReached` makes no claim about solvability. Open maps
-allow objects to travel indefinitely outside the drawing, so searches without a
-cap may never finish and can consume unbounded memory. Search does not clip
-coordinates or change the simulator's rules.
+allow objects to travel indefinitely beyond the horizontal edges, so searches
+without a cap may never finish and can consume unbounded memory. Search does not
+clip horizontal coordinates or change the simulator's rules.
 
 `SolveStats` reports `discovered_states` (distinct retained states, excluding
 discarded game-over successors) and `expanded_states` (states whose successor
@@ -410,11 +410,12 @@ that cell does not win. A `D` may occupy the goal cell independently, so its
 passability follows the pressure-plate gate rules. Winning freezes the state until
 undo or restart.
 
-Map coordinates increase rightward/downward. Outside the drawing is empty space;
-leaving the map has no special effect yet. Torches are decorative. Skulls are
-passable for players and projectiles but act as walls for cubes. `to_ascii()`
-renders only the original map rectangle, so use `player().position` to inspect a
-player outside it.
+Map coordinates increase rightward/downward. Moving below the level's bottom
+boundary wraps a player or falling cube to the top row. The map itself does not
+repeat: space above the top and beyond either horizontal edge is empty. Torches
+are decorative. Skulls are passable for players and projectiles but act as walls
+for cubes. `to_ascii()` renders only the original map rectangle, so use
+`player().position` to inspect a player outside it.
 Maps require exactly one `@` and can include map cubes (`C`), at most one existing
 player cube (`O`), gates (`D`), goal pedestals (`G`), and pressure-plate bases
 (`P`). Ragged

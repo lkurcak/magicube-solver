@@ -267,7 +267,7 @@ mod tests {
             replay.apply(command, now);
             assert_eq!(replay.position(), expected);
         }
-        assert_eq!(replay.state().player().position.y, 50);
+        assert_eq!(replay.state().player().position.y, 0);
         let mut empty = Replay::new(initial.clone(), vec![]);
         for command in [Command::End, Command::Back(10), Command::TogglePlayback] {
             empty.apply(command, now);

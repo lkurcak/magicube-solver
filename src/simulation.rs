@@ -153,6 +153,13 @@ impl Level {
         }
     }
 
+    fn wrap_below(&self, mut position: Position) -> Position {
+        if position.y >= self.height as isize {
+            position.y = 0;
+        }
+        position
+    }
+
     /// Whether this occupiable position is immediately above a goal pedestal.
     pub fn is_goal(&self, position: Position) -> bool {
         self.tile_at(position.offset(0, 1)) == Tile::Pedestal
@@ -577,7 +584,9 @@ impl GameState {
                         self.try_move_ignoring_plate_cube(0, 1, ignored_plate_cube);
                     }
                     Some(index) => {
-                        let target = self.cubes[index].position.offset(0, 1);
+                        let target = self
+                            .level
+                            .wrap_below(self.cubes[index].position.offset(0, 1));
                         if !self.is_solid_for_cube_ignoring_plate_cube(target, ignored_plate_cube) {
                             self.cubes[index].position = target;
                             if let Some(swept) = swept_cube_positions.as_deref_mut() {
@@ -680,7 +689,7 @@ impl GameState {
         dy: isize,
         ignored_cube: Option<usize>,
     ) -> bool {
-        let position = self.player.position.offset(dx, dy);
+        let position = self.level.wrap_below(self.player.position.offset(dx, dy));
         if self.is_solid_ignoring_plate_cube(position, ignored_cube) {
             return false;
         }

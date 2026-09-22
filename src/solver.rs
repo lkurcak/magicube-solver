@@ -64,8 +64,9 @@ pub struct SolveResult {
 /// [`GameState::step`], even when starting while aiming or recovering.
 ///
 /// Search is synchronous and breadth-first. States outside the map remain valid;
-/// their unbounded coordinates can prevent exhaustion. Reaching the configured
-/// state limit is therefore distinct from proving that a level is unsolvable.
+/// horizontally unbounded coordinates can prevent exhaustion. Reaching the
+/// configured state limit is therefore distinct from proving that a level is
+/// unsolvable.
 ///
 /// ```
 /// use magicube_solver::{GameState, GameStatus, SolveOptions, SolveOutcome, solve};
