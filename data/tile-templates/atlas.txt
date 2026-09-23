@@ -28,3 +28,13 @@ D ../tiles-manual/gate-and-goal2.png
 _ ../tiles-manual/pressure-plate.png
 P ../tiles-manual/pressure-plate-base.png
 P ../tiles-manual/pressure-plate-base-pressed.png
+{ ../tiles-manual/laser-left.png
+} ../tiles-manual/laser-right.png
+^ ../tiles-manual/laser-up.png
+v ../tiles-manual/laser-down.png
+v ../tiles-manual/laser-down2.png
+T ../tiles-manual/laser-trigger.png
+T ../tiles-manual/laser-trigger-activated.png
+_ ../tiles-manual/laser-beam-horizontal.png
+_ ../tiles-manual/laser-beam-horizontal2.png
+_ ../tiles-manual/laser-beam-vertical.png

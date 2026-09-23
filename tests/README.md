@@ -9,6 +9,9 @@ open map edges. `shooting.rs` covers aiming, shot recovery, projectile collision
 falling, crushing, default grounded-only shots, and optional airborne shots.
 `pushing.rs` covers cube chains, blocked and falling cubes, pushing off ledges,
 grounded-only defaults, and independent airborne-pushing opt-in during jumps.
+`lasers.rs` covers emitter and trigger parsing, beam blocking and crossing,
+player death by walking, jumping, or falling into beams and by losing a cube's
+shelter, and triggers acting as pressure plates.
 `goals.rs` covers passable positions above solid pedestals and winning with the
 player's cube.
 `solutions.rs` replays saved solutions for levels 1–7, solves each with the default

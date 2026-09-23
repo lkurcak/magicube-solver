@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use crate::{GameInput, GameState, GameStatus, PlayerMode};
@@ -99,6 +100,21 @@ pub fn solve_with_progress(
     options: SolveOptions,
     mut progress: impl FnMut(SolveStats),
 ) -> SolveResult {
+    solve_cancellable(initial, options, |stats| {
+        progress(stats);
+        ControlFlow::Continue(())
+    })
+    .expect("the progress callback never cancels")
+}
+
+/// Equivalent to [`solve_with_progress`], except that the callback can stop the
+/// search by returning [`ControlFlow::Break`], which returns `None`. Use this
+/// for searches without a state limit, which may otherwise never finish.
+pub fn solve_cancellable(
+    initial: &GameState,
+    options: SolveOptions,
+    mut progress: impl FnMut(SolveStats) -> ControlFlow<()>,
+) -> Option<SolveResult> {
     let mut stats = SolveStats::default();
     let immediate = match initial.status() {
         GameStatus::Won => Some(SolveOutcome::Solved(Vec::new())),
@@ -109,7 +125,7 @@ pub fn solve_with_progress(
         GameStatus::Playing => None,
     };
     if let Some(outcome) = immediate {
-        return SolveResult { outcome, stats };
+        return Some(SolveResult { outcome, stats });
     }
 
     // Nodes serve as both a FIFO queue (via the cursor) and a parent arena.
@@ -125,8 +141,10 @@ pub fn solve_with_progress(
     while cursor < nodes.len() {
         let state = Rc::clone(&nodes[cursor].state);
         stats.expanded_states += 1;
-        if stats.expanded_states == 1 || stats.expanded_states.is_multiple_of(10_000) {
-            progress(stats);
+        if (stats.expanded_states == 1 || stats.expanded_states.is_multiple_of(10_000))
+            && progress(stats).is_break()
+        {
+            return None;
         }
         let inputs: &[GameInput] = match state.0.player().mode {
             PlayerMode::Normal => &[
@@ -147,10 +165,10 @@ pub fn solve_with_progress(
                 continue;
             }
             if options.max_states.is_some_and(|limit| nodes.len() >= limit) {
-                return SolveResult {
+                return Some(SolveResult {
                     outcome: SolveOutcome::StateLimitReached,
                     stats,
-                };
+                });
             }
             let won = next.0.status() == GameStatus::Won;
             let next = Rc::new(next);
@@ -161,18 +179,18 @@ pub fn solve_with_progress(
             });
             stats.discovered_states += 1;
             if won {
-                return SolveResult {
+                return Some(SolveResult {
                     outcome: SolveOutcome::Solved(reconstruct(&nodes, nodes.len() - 1)),
                     stats,
-                };
+                });
             }
         }
         cursor += 1;
     }
-    SolveResult {
+    Some(SolveResult {
         outcome: SolveOutcome::Unsolvable,
         stats,
-    }
+    })
 }
 
 struct Node {

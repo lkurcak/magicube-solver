@@ -36,6 +36,48 @@ impl Direction {
     }
 }
 
+/// The direction a laser emitter fires its beam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LaserDirection {
+    Left,
+    Up,
+    Right,
+    Down,
+}
+
+impl LaserDirection {
+    fn step(self, position: Position) -> Position {
+        match self {
+            Self::Left => position.offset(-1, 0),
+            Self::Up => position.offset(0, -1),
+            Self::Right => position.offset(1, 0),
+            Self::Down => position.offset(0, 1),
+        }
+    }
+
+    /// Whether `target` lies on the ray leaving `origin` in this direction.
+    fn points_at(self, origin: Position, target: Position) -> bool {
+        match self {
+            Self::Left => target.y == origin.y && target.x < origin.x,
+            Self::Up => target.x == origin.x && target.y < origin.y,
+            Self::Right => target.y == origin.y && target.x > origin.x,
+            Self::Down => target.x == origin.x && target.y > origin.y,
+        }
+    }
+
+    fn is_horizontal(self) -> bool {
+        matches!(self, Self::Left | Self::Right)
+    }
+}
+
+/// Orientation of the laser beams crossing a tile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LaserBeam {
+    Horizontal,
+    Vertical,
+    Crossing,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayerMode {
     Normal,
@@ -103,6 +145,10 @@ pub enum Tile {
     Pedestal,
     Skull,
     Torch,
+    /// A solid laser source firing in the given direction.
+    LaserEmitter(LaserDirection),
+    /// A solid switch that acts like a pressed pressure plate while a laser hits it.
+    LaserTrigger,
     Unknown,
 }
 
@@ -121,6 +167,11 @@ impl Tile {
             Self::Pedestal => 'G',
             Self::Skull => 'S',
             Self::Torch => 't',
+            Self::LaserEmitter(LaserDirection::Left) => '{',
+            Self::LaserEmitter(LaserDirection::Up) => '^',
+            Self::LaserEmitter(LaserDirection::Right) => '}',
+            Self::LaserEmitter(LaserDirection::Down) => 'v',
+            Self::LaserTrigger => 'T',
             Self::Unknown => '?',
         }
     }
@@ -132,6 +183,8 @@ pub struct Level {
     width: usize,
     height: usize,
     tiles: Vec<Tile>,
+    /// Every laser emitter, derived from `tiles`.
+    emitters: Vec<(Position, LaserDirection)>,
 }
 
 impl Level {
@@ -175,6 +228,11 @@ impl Level {
     pub(crate) fn has_goal(&self) -> bool {
         self.tiles.contains(&Tile::Pedestal)
     }
+
+    fn contains(&self, position: Position) -> bool {
+        (0..self.width as isize).contains(&position.x)
+            && (0..self.height as isize).contains(&position.y)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -216,7 +274,9 @@ impl GameState {
     /// bases are solid; their interactive positions are one tile above. Torches
     /// are passable for all bodies and projectiles. Skulls are passable for the
     /// player and projectiles, but block cubes. Unknown tiles stop projectiles but
-    /// do not block player movement or supply ground support.
+    /// do not block player movement or supply ground support. `{`, `^`, `}`, and
+    /// `v` are solid laser emitters firing left, up, right, and down; `T` is a
+    /// solid laser trigger.
     pub fn from_ascii(map: &str) -> Result<Self, ParseLevelError> {
         Self::from_ascii_with_settings(map, GameSettings::default())
     }
@@ -241,6 +301,7 @@ impl GameState {
             width,
             height: lines.len(),
             tiles: vec![Tile::Empty; width * lines.len()],
+            emitters: Vec::new(),
         };
         let mut player_position = None;
         let mut cubes: Vec<Cube> = Vec::new();
@@ -258,6 +319,11 @@ impl GameState {
                     'G' => Tile::Pedestal,
                     'S' => Tile::Skull,
                     't' => Tile::Torch,
+                    '{' => Tile::LaserEmitter(LaserDirection::Left),
+                    '^' => Tile::LaserEmitter(LaserDirection::Up),
+                    '}' => Tile::LaserEmitter(LaserDirection::Right),
+                    'v' => Tile::LaserEmitter(LaserDirection::Down),
+                    'T' => Tile::LaserTrigger,
                     '?' => Tile::Unknown,
                     'C' | 'g' | 'O' => {
                         let source = match symbol {
@@ -281,6 +347,9 @@ impl GameState {
                     }
                     _ => return Err(ParseLevelError::InvalidTile { position, symbol }),
                 };
+                if let Tile::LaserEmitter(direction) = level.tiles[y * width + x] {
+                    level.emitters.push((position, direction));
+                }
             }
         }
 
@@ -329,16 +398,111 @@ impl GameState {
     }
 
     /// A pressure plate is active while the position above its base is occupied
-    /// by the player or either kind of cube.
+    /// by the player or any kind of cube. A laser trigger hit by a beam counts
+    /// as an active pressure plate.
     pub fn pressure_plates_active(&self) -> bool {
         self.pressure_plates_active_ignoring_cube(None)
     }
 
     fn pressure_plates_active_ignoring_cube(&self, ignored_cube: Option<usize>) -> bool {
+        self.pressure_plates_pressed_ignoring_cube(ignored_cube) || self.laser_triggers_lit()
+    }
+
+    /// Plate activity from occupants only, ignoring laser triggers.
+    fn pressure_plates_pressed_ignoring_cube(&self, ignored_cube: Option<usize>) -> bool {
         self.level.is_pressure_plate(self.player.position)
             || self.cubes.iter().enumerate().any(|(index, cube)| {
                 Some(index) != ignored_cube && self.level.is_pressure_plate(cube.position)
             })
+    }
+
+    /// Whether a laser beam stops at `position`. Beams pass through empty
+    /// space, torches, skulls, glass cubes, and the player (who dies instead).
+    /// Gates stop beams only while closed by occupied pressure plates; a gate
+    /// closed by a laser trigger never cuts off a beam, which keeps the
+    /// trigger's own state free of feedback loops.
+    fn blocks_laser(&self, position: Position) -> bool {
+        let tile_blocks = match self.level.tile_at(position) {
+            Tile::Empty | Tile::Skull | Tile::Torch => false,
+            Tile::Gate => {
+                self.pressure_plates_pressed_ignoring_cube(None) && !self.body_occupies(position)
+            }
+            _ => true,
+        };
+        tile_blocks
+            || self
+                .cubes
+                .iter()
+                .any(|cube| cube.position == position && cube.source != CubeSource::Glass)
+    }
+
+    /// Whether any emitter's beam ends on a laser trigger.
+    fn laser_triggers_lit(&self) -> bool {
+        self.level.emitters.iter().any(|&(emitter, direction)| {
+            self.level.tile_at(self.laser_beam_end(emitter, direction)) == Tile::LaserTrigger
+        })
+    }
+
+    /// The first blocking position along a beam, or the first position outside
+    /// the map. Only bodies exist beyond the map, and the beam cannot hit a
+    /// trigger there.
+    fn laser_beam_end(&self, emitter: Position, direction: LaserDirection) -> Position {
+        let mut position = direction.step(emitter);
+        while self.level.contains(position) && !self.blocks_laser(position) {
+            position = direction.step(position);
+        }
+        position
+    }
+
+    /// Whether a laser trigger at `position` is currently hit by a beam.
+    pub fn laser_trigger_lit(&self, position: Position) -> bool {
+        self.level.tile_at(position) == Tile::LaserTrigger
+            && self.level.emitters.iter().any(|&(emitter, direction)| {
+                direction.points_at(emitter, position)
+                    && self.laser_beam_end(emitter, direction) == position
+            })
+    }
+
+    /// Laser beams crossing `position`. Beams continue indefinitely beyond
+    /// the map's edges until a body blocks them.
+    pub fn laser_beam_at(&self, position: Position) -> Option<LaserBeam> {
+        if self.blocks_laser(position) {
+            return None;
+        }
+        let (mut horizontal, mut vertical) = (false, false);
+        for &(emitter, direction) in &self.level.emitters {
+            if !direction.points_at(emitter, position)
+                || (direction.is_horizontal() && horizontal)
+                || (!direction.is_horizontal() && vertical)
+            {
+                continue;
+            }
+            let mut current = direction.step(emitter);
+            while current != position && !self.blocks_laser(current) {
+                current = direction.step(current);
+            }
+            if current == position {
+                if direction.is_horizontal() {
+                    horizontal = true;
+                } else {
+                    vertical = true;
+                }
+            }
+        }
+        match (horizontal, vertical) {
+            (true, true) => Some(LaserBeam::Crossing),
+            (true, false) => Some(LaserBeam::Horizontal),
+            (false, true) => Some(LaserBeam::Vertical),
+            (false, false) => None,
+        }
+    }
+
+    /// A player touching a laser beam dies, including while moving through it.
+    fn apply_laser_damage(&mut self) {
+        if self.status == GameStatus::Playing && self.laser_beam_at(self.player.position).is_some()
+        {
+            self.status = GameStatus::GameOver;
+        }
     }
 
     fn body_occupies(&self, position: Position) -> bool {
@@ -355,10 +519,16 @@ impl GameState {
         ignored_cube: Option<usize>,
     ) -> bool {
         let tile = self.level.tile_at(position);
-        matches!(tile, Tile::Wall | Tile::PressurePlateBase | Tile::Pedestal)
-            || (tile.is_gate()
-                && self.pressure_plates_active_ignoring_cube(ignored_cube)
-                && !self.body_occupies(position))
+        matches!(
+            tile,
+            Tile::Wall
+                | Tile::PressurePlateBase
+                | Tile::Pedestal
+                | Tile::LaserEmitter(_)
+                | Tile::LaserTrigger
+        ) || (tile.is_gate()
+            && self.pressure_plates_active_ignoring_cube(ignored_cube)
+            && !self.body_occupies(position))
     }
 
     fn is_solid_ignoring_plate_cube(
@@ -368,15 +538,6 @@ impl GameState {
     ) -> bool {
         self.is_solid_tile_ignoring_plate_cube(position, ignored_cube)
             || self.cubes.iter().any(|cube| cube.position == position)
-    }
-
-    fn is_solid_for_cube_ignoring_plate_cube(
-        &self,
-        position: Position,
-        ignored_cube: Option<usize>,
-    ) -> bool {
-        self.is_solid_ignoring_plate_cube(position, ignored_cube)
-            || self.level.tile_at(position) == Tile::Skull
     }
 
     pub fn is_grounded(&self) -> bool {
@@ -493,6 +654,9 @@ impl GameState {
                 GameInput::Jump | GameInput::Shoot | GameInput::Wait => {}
             }
         }
+        // Walking, jumping, pushing, or removing the old player cube can expose
+        // the player to a beam.
+        next.apply_laser_damage();
 
         let swept_cube_positions = next.gravity_swept_cube_positions();
         let spawned_cube = next.advance_projectile(&swept_cube_positions);
@@ -510,6 +674,7 @@ impl GameState {
             !jumped && next.player.air_inputs_remaining == 0,
             spawned_cube,
         );
+        next.apply_laser_damage();
         if next.is_grounded() {
             next.player.air_inputs_remaining = 0;
         }
@@ -627,19 +792,46 @@ impl GameState {
                 .collect();
             bodies.push((self.player.position.y, None));
             bodies.sort_by_key(|(y, _)| Reverse(*y));
+            // Bodies in a substep fall together, so a gate occupied as the
+            // substep begins stays open until it ends. Without this, a stack
+            // would lose its gate between the lower body leaving and the upper
+            // body entering it.
+            let held_open_gates: Vec<_> = bodies
+                .iter()
+                .map(|&(_, body)| match body {
+                    Some(index) => self.cubes[index].position,
+                    None => self.player.position,
+                })
+                .filter(|&position| self.level.tile_at(position).is_gate())
+                .collect();
+            let blocks_fall = |state: &Self, target: Position, cube: bool| {
+                (!held_open_gates.contains(&target)
+                    && state.is_solid_tile_ignoring_plate_cube(target, ignored_plate_cube))
+                    || state.cubes.iter().any(|other| other.position == target)
+                    || (cube && state.level.tile_at(target) == Tile::Skull)
+            };
             for (_, body) in bodies {
                 if self.status == GameStatus::GameOver {
                     return;
                 }
+                // The projectile-collision preview must record every sweep, so
+                // only the real pass applies laser damage.
+                let real_pass = swept_cube_positions.is_none();
                 match body {
                     None if player_falls => {
-                        self.try_move_ignoring_plate_cube(0, 1, ignored_plate_cube);
+                        let target = self.level.wrap_below(self.player.position.offset(0, 1));
+                        if !blocks_fall(self, target, false) {
+                            self.player.position = target;
+                            if real_pass {
+                                self.apply_laser_damage();
+                            }
+                        }
                     }
                     Some(index) => {
                         let target = self
                             .level
                             .wrap_below(self.cubes[index].position.offset(0, 1));
-                        if !self.is_solid_for_cube_ignoring_plate_cube(target, ignored_plate_cube) {
+                        if !blocks_fall(self, target, true) {
                             self.cubes[index].position = target;
                             if let Some(swept) = swept_cube_positions
                                 .as_deref_mut()
@@ -649,6 +841,9 @@ impl GameState {
                             }
                             if target == self.player.position {
                                 self.status = GameStatus::GameOver;
+                            } else if real_pass {
+                                // A falling cube can uncover a beam aimed at the player.
+                                self.apply_laser_damage();
                             }
                         }
                     }

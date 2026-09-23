@@ -3,7 +3,7 @@ mod support;
 use magicube_solver::GameInput::{Jump, Left, Right, Shoot, Wait};
 use magicube_solver::{
     GameInput, GameSettings, GameState, GameStatus, PlayerMode, SolveOptions, SolveOutcome,
-    SolveStats, solve,
+    SolveStats, solve, solve_cancellable,
 };
 use support::level;
 
@@ -322,6 +322,26 @@ fn open_maps_reach_the_limit_instead_of_claiming_unsolvability() {
     );
     assert_eq!(result.outcome, SolveOutcome::StateLimitReached);
     assert_eq!(result.stats.discovered_states, 100);
+}
+
+#[test]
+fn unlimited_searches_on_open_maps_can_be_cancelled() {
+    let initial = game(
+        r#"
+@ G
+"#,
+    );
+    let mut reports = Vec::new();
+    let result = solve_cancellable(&initial, SolveOptions { max_states: None }, |stats| {
+        reports.push(stats.expanded_states);
+        if stats.expanded_states >= 20_000 {
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    });
+    assert_eq!(result, None);
+    assert_eq!(reports, [1, 10_000, 20_000]);
 }
 
 #[test]

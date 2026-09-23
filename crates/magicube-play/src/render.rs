@@ -4,7 +4,9 @@ use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
-use magicube_solver::{GameInput, GameSettings, GameState, GameStatus, PlayerMode, Position};
+use magicube_solver::{
+    GameInput, GameSettings, GameState, GameStatus, LaserBeam, PlayerMode, Position,
+};
 
 use crate::app::App;
 use crate::replay::Replay;
@@ -270,7 +272,16 @@ fn draw_board(
                 x: origin.x + x as isize,
                 y: origin.y + y as isize,
             };
-            let glyph = state.symbol_at(position);
+            let mut glyph = state.symbol_at(position);
+            // Beams are derived each frame, so level files never contain them.
+            if glyph == ' ' {
+                glyph = match state.laser_beam_at(position) {
+                    Some(LaserBeam::Horizontal) => '-',
+                    Some(LaserBeam::Vertical) => '|',
+                    Some(LaserBeam::Crossing) => '+',
+                    None => ' ',
+                };
+            }
             let color = match glyph {
                 '@' if state.status() == GameStatus::GameOver => Color::Red,
                 '@' => Color::Cyan,
@@ -286,6 +297,9 @@ fn draw_board(
                 'G' => Color::Green,
                 'S' => Color::Red,
                 't' => Color::Yellow,
+                '{' | '}' | '^' | 'v' | '-' | '|' | '+' => Color::Red,
+                'T' if state.laser_trigger_lit(position) => Color::White,
+                'T' => Color::DarkGrey,
                 '?' => Color::Magenta,
                 _ => Color::Reset,
             };

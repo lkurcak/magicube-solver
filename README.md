@@ -58,6 +58,23 @@ unresolved levels one at a time. Failed searches are reused only for the same
 map, state limit, and compiled dashboard. Select a solved row and press Enter to
 open its replay. Deleting `cache/` makes the next run reconstruct everything.
 
+| Key | Dashboard action |
+| --- | --- |
+| Up/Down or J/K, Home/End | Select a level |
+| Enter | Replay the selected level's solution |
+| R | Re-solve the selected level with the default state limit, ignoring its cache |
+| U | Re-solve the selected level without a state limit |
+| C | Cancel the running search |
+| Q / Esc | Quit |
+
+Requested solves run before the rest of the startup queue. Requesting the level
+that is currently being solved restarts it with the new limit. The previous
+solution stays replayable until the new result replaces it. Cancelling restores
+the previous result and leaves the cache unchanged. Searches without a limit may
+never finish on open maps and can use unbounded memory, so cancel them with
+**C**. A cached state-limit failure is reused only when its limit is at least the
+default one. A cached exhausted (unsolvable) search is reused under any limit.
+
 Print level 1 with the original prototype binary:
 
 ```sh
@@ -144,6 +161,9 @@ grounded-only rules, regardless of the manual-play toggles. During gameplay,
 The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
 `P` is a pressure-plate base, `G` is a goal pedestal, and `D` is a gate.
+`{`, `^`, `}`, and `v` are laser emitters firing left, up, right, and down; `T`
+is a laser trigger. Beams are drawn as red `-`, `|`, or `+` (crossing), and a
+trigger turns white while a beam hits it.
 Both bases are solid; their interactive position is the cell immediately above.
 Gates are normally passable, but become solid while the player or either kind of
 cube occupies the cell above a pressure-plate base. An occupied gate stays open
@@ -313,6 +333,10 @@ allow objects to travel indefinitely beyond the horizontal edges, so searches
 without a cap may never finish and can consume unbounded memory. Search does not
 clip horizontal coordinates or change the simulator's rules.
 
+`solve_with_progress` reports statistics periodically. `solve_cancellable` is
+the same, except its callback can return `ControlFlow::Break(())` to stop the
+search, in which case it returns `None`.
+
 `SolveStats` reports `discovered_states` (distinct retained states, excluding
 discarded game-over successors) and `expanded_states` (states whose successor
 generation began, including a partially processed final state). Terminal starts
@@ -405,11 +429,27 @@ projectile's last position is a skull or a glass cube, the projectile is
 destroyed without creating the cube. After projectile movement, gravity runs in two
 single-tile substeps for both player and cubes, processing lower bodies first.
 This lets stacks fall together and prevents cubes from skipping through platforms,
-skulls, or the player. Newly spawned cubes participate in gravity immediately.
+skulls, or the player. A gate occupied at the start of a substep stays open for
+that whole substep, so a body riding on a cube follows it through the gate even
+if the plates re-activate as they fall. Newly spawned cubes participate in gravity immediately.
 A cube spawned immediately above a pressure-plate base does not reactivate gates
 until that update's gravity pass finishes; other plate occupants continue to
 affect gates immediately. A cube entering the player's tile causes game over;
 further simulation inputs do nothing.
+
+`{`/`^`/`}`/`v` laser emitters fire a beam left, up, right, or down. Emitters
+and `T` laser triggers are solid, like walls. A beam travels until the first
+wall, feature base, emitter, trigger, unknown tile, or non-glass cube; it passes
+through empty space, torches, skulls, glass cubes, and open gates, and continues
+indefinitely beyond an open map edge. A gate closed by an occupied pressure plate
+stops beams. A gate closed only by a laser trigger does not, which keeps a
+trigger from cutting off its own beam. A trigger hit by a beam counts as an
+active pressure plate. Beams are derived from the current state and never appear
+in level files or `to_ascii()`. Screenshot beam tiles import as empty space.
+The player dies on touching a beam. This is checked after the player's action,
+after every single-tile gravity move of the player or a cube (so falling through
+a beam, or a cube falling away from a shielded player, is fatal), and at the end
+of the update. Projectiles ignore beams.
 
 `G` is a solid goal pedestal. At the end of an update, the player's `O` cube
 occupying the cell immediately above a pedestal wins, whether
@@ -425,6 +465,6 @@ are decorative. Skulls are passable for players and projectiles but act as walls
 for cubes. `to_ascii()` renders only the original map rectangle, so use
 `player().position` to inspect a player outside it.
 Maps require exactly one `@` and can include map cubes (`C`), glass cubes (`g`), at most one existing
-player cube (`O`), gates (`D`), goal pedestals (`G`), and pressure-plate bases
-(`P`). Ragged
+player cube (`O`), gates (`D`), goal pedestals (`G`), pressure-plate bases
+(`P`), laser emitters (`{`, `^`, `}`, `v`), and laser triggers (`T`). Ragged
 rows are padded with empty tiles, matching the screenshot importer's format.

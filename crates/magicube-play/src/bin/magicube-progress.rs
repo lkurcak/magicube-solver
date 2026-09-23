@@ -1,5 +1,7 @@
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::io::{self, IsTerminal};
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -13,7 +15,7 @@ use magicube_solver::project::{
     executable_fingerprint, import_project,
 };
 use magicube_solver::{
-    GameInput, GameState, SolveOptions, SolveOutcome, SolveStats, solve_with_progress,
+    GameInput, GameState, SolveOptions, SolveOutcome, SolveStats, solve_cancellable,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};
@@ -32,11 +34,23 @@ fn main() -> ExitCode {
     }
 }
 
+/// Commands from the dashboard to the solver worker.
+#[derive(Debug)]
+enum Request {
+    /// Solve a level again, ignoring its cache. Replaces a queued or running
+    /// job for the same level and runs before the remaining pipeline.
+    Solve { id: String, options: SolveOptions },
+    /// Stop the running search without caching anything.
+    Cancel,
+}
+
 #[derive(Debug)]
 enum WorkerEvent {
     Imported(ProjectImport),
     Queued(String),
-    Solving(String, SolveStats),
+    /// Progress, with the search's state limit.
+    Solving(String, SolveStats, Option<usize>),
+    Cancelled(String),
     Solved(String, Vec<GameInput>, bool, SolveStats),
     Unsolvable(String, bool, SolveStats),
     LimitReached(String, bool, SolveStats),
@@ -49,7 +63,8 @@ enum SolveView {
     NotApplicable,
     CheckingCache,
     Queued,
-    Solving(SolveStats),
+    Solving(SolveStats, Option<usize>),
+    Cancelled,
     Solved {
         input_count: usize,
         cached: bool,
@@ -70,6 +85,9 @@ struct LevelRow {
     level: ProjectLevel,
     solve: SolveView,
     inputs: Option<Vec<GameInput>>,
+    /// The finished result shown before a dashboard solve request, restored if
+    /// that request is cancelled.
+    restore: Option<SolveView>,
 }
 
 struct Dashboard {
@@ -110,15 +128,19 @@ impl Dashboard {
                         },
                         level,
                         inputs: None,
+                        restore: None,
                     })
                     .collect();
                 self.selected = self.selected.min(self.rows.len().saturating_sub(1));
                 self.message = "Imports rebuilt; validating solver cache…".to_owned();
             }
             WorkerEvent::Queued(id) => self.update(&id, |row| row.solve = SolveView::Queued),
-            WorkerEvent::Solving(id, stats) => {
-                self.update(&id, |row| row.solve = SolveView::Solving(stats))
+            WorkerEvent::Solving(id, stats, max_states) => {
+                self.update(&id, |row| row.solve = SolveView::Solving(stats, max_states))
             }
+            WorkerEvent::Cancelled(id) => self.update(&id, |row| {
+                row.solve = row.restore.take().unwrap_or(SolveView::Cancelled);
+            }),
             WorkerEvent::Solved(id, inputs, cached, stats) => self.update(&id, |row| {
                 row.solve = SolveView::Solved {
                     input_count: inputs.len(),
@@ -126,16 +148,22 @@ impl Dashboard {
                     stats,
                 };
                 row.inputs = Some(inputs);
+                row.restore = None;
             }),
             WorkerEvent::Unsolvable(id, cached, stats) => self.update(&id, |row| {
-                row.solve = SolveView::Unsolvable { cached, stats }
+                row.solve = SolveView::Unsolvable { cached, stats };
+                row.inputs = None;
+                row.restore = None;
             }),
             WorkerEvent::LimitReached(id, cached, stats) => self.update(&id, |row| {
-                row.solve = SolveView::LimitReached { cached, stats }
+                row.solve = SolveView::LimitReached { cached, stats };
+                row.inputs = None;
+                row.restore = None;
             }),
             WorkerEvent::Finished => {
                 self.finished = true;
-                self.message = "Pipeline complete. Cached artifacts are under cache/.".to_owned();
+                self.message =
+                    "All solver jobs complete. Cached artifacts are under cache/.".to_owned();
             }
             WorkerEvent::Fatal(message) => {
                 self.finished = true;
@@ -152,6 +180,36 @@ impl Dashboard {
 
     fn selected(&self) -> Option<&LevelRow> {
         self.rows.get(self.selected)
+    }
+
+    /// Marks the selected clean level as queued and returns the worker request.
+    /// A previously replayable solution stays available until replaced.
+    fn request_solve(&mut self, options: SolveOptions) -> Option<Request> {
+        let row = self.rows.get_mut(self.selected)?;
+        if !row.level.is_clean() {
+            return None;
+        }
+        if row.restore.is_none()
+            && matches!(
+                row.solve,
+                SolveView::Solved { .. }
+                    | SolveView::Unsolvable { .. }
+                    | SolveView::LimitReached { .. }
+            )
+        {
+            row.restore = Some(row.solve.clone());
+        }
+        row.solve = SolveView::Queued;
+        self.finished = false;
+        self.message = format!(
+            "Queued {} ({}).",
+            row.level.name,
+            limit_label(options.max_states)
+        );
+        Some(Request::Solve {
+            id: row.level.id.clone(),
+            options,
+        })
     }
 }
 
@@ -171,7 +229,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let paths = ProjectPaths::from_root(&root);
     let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || worker(paths, sender));
+    let (requests, request_receiver) = mpsc::channel();
+    std::thread::spawn(move || worker(paths, sender, request_receiver));
 
     let mut dashboard = Dashboard::loading();
     let mut session = TerminalSession::enter()?;
@@ -204,6 +263,20 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             KeyCode::Down | KeyCode::Char('j' | 'J') if !dashboard.rows.is_empty() => {
                 dashboard.selected = (dashboard.selected + 1) % dashboard.rows.len();
+            }
+            KeyCode::Char(key @ ('r' | 'R' | 'u' | 'U')) => {
+                let max_states = if key.eq_ignore_ascii_case(&'u') {
+                    None
+                } else {
+                    SolveOptions::default().max_states
+                };
+                if let Some(request) = dashboard.request_solve(SolveOptions { max_states }) {
+                    // A worker that already failed reports it in the message line.
+                    let _ = requests.send(request);
+                }
+            }
+            KeyCode::Char('c' | 'C') => {
+                let _ = requests.send(Request::Cancel);
             }
             KeyCode::Home => dashboard.selected = 0,
             KeyCode::End if !dashboard.rows.is_empty() => {
@@ -241,13 +314,23 @@ fn drain_events(receiver: &Receiver<WorkerEvent>, dashboard: &mut Dashboard) {
     }
 }
 
-fn worker(paths: ProjectPaths, sender: Sender<WorkerEvent>) {
-    if let Err(error) = worker_inner(&paths, &sender) {
+fn worker(paths: ProjectPaths, sender: Sender<WorkerEvent>, requests: Receiver<Request>) {
+    if let Err(error) = worker_inner(&paths, &sender, &requests) {
         let _ = sender.send(WorkerEvent::Fatal(error.to_string()));
     }
 }
 
-fn worker_inner(paths: &ProjectPaths, sender: &Sender<WorkerEvent>) -> Result<(), Box<dyn Error>> {
+struct Job {
+    id: String,
+    map: String,
+    options: SolveOptions,
+}
+
+fn worker_inner(
+    paths: &ProjectPaths,
+    sender: &Sender<WorkerEvent>,
+    requests: &Receiver<Request>,
+) -> Result<(), Box<dyn Error>> {
     let project = import_project(paths)?;
     sender.send(WorkerEvent::Imported(project.clone()))?;
     let fingerprint = executable_fingerprint()?;
@@ -255,21 +338,24 @@ fn worker_inner(paths: &ProjectPaths, sender: &Sender<WorkerEvent>) -> Result<()
     let solver_dir = paths.solver_cache();
     std::fs::create_dir_all(&solver_dir)?;
 
-    let mut pending = Vec::new();
+    let mut maps = HashMap::new();
+    let mut queue = VecDeque::new();
     for level in project.levels.into_iter().filter(ProjectLevel::is_clean) {
-        let map = level.map.as_deref().unwrap();
+        let map = level.map.clone().unwrap();
+        maps.insert(level.id.clone(), map.clone());
         let path = solver_dir.join(format!("{}.json", level.id));
         let cached = SolverCacheRecord::load(&path).ok();
-        if let Some((record, inputs)) = cached
-            .as_ref()
-            .and_then(|record| record.solved_inputs_for(map).map(|inputs| (record, inputs)))
-        {
+        if let Some((record, inputs)) = cached.as_ref().and_then(|record| {
+            record
+                .solved_inputs_for(&map)
+                .map(|inputs| (record, inputs))
+        }) {
             sender.send(WorkerEvent::Solved(level.id, inputs, true, stats(record)))?;
             continue;
         }
         if let Some(record) = cached
             .as_ref()
-            .filter(|record| record.reusable_failure(&level.id, map, options, &fingerprint))
+            .filter(|record| record.reusable_failure(&level.id, &map, options, &fingerprint))
         {
             let event = match record.outcome {
                 CachedSolveOutcome::Unsolvable => {
@@ -284,18 +370,91 @@ fn worker_inner(paths: &ProjectPaths, sender: &Sender<WorkerEvent>) -> Result<()
             continue;
         }
         sender.send(WorkerEvent::Queued(level.id.clone()))?;
-        pending.push(level);
+        queue.push_back(Job {
+            id: level.id,
+            map,
+            options,
+        });
     }
 
-    for level in pending {
-        let map = level.map.as_deref().unwrap();
-        let initial = GameState::from_ascii(map)?;
-        let id = level.id.clone();
-        sender.send(WorkerEvent::Solving(id.clone(), SolveStats::default()))?;
-        let result = solve_with_progress(&initial, options, |stats| {
-            let _ = sender.send(WorkerEvent::Solving(id.clone(), stats));
+    // Dashboard requests jump the queue and replace any queued job for the
+    // same level, so they are applied before starting each job.
+    let enqueue = |queue: &mut VecDeque<Job>, request: Request| -> Result<(), Box<dyn Error>> {
+        let Request::Solve { id, options } = request else {
+            return Ok(()); // Nothing is running between jobs.
+        };
+        let Some(map) = maps.get(&id) else {
+            return Ok(());
+        };
+        queue.retain(|job| job.id != id);
+        sender.send(WorkerEvent::Queued(id.clone()))?;
+        queue.push_front(Job {
+            id,
+            map: map.clone(),
+            options,
         });
-        let record = SolverCacheRecord::from_result(&id, map, options, &fingerprint, &result);
+        Ok(())
+    };
+    let mut idle_reported = false;
+    loop {
+        if queue.is_empty() {
+            if !idle_reported {
+                sender.send(WorkerEvent::Finished)?;
+                idle_reported = true;
+            }
+            // The dashboard has quit once its request sender is gone.
+            let Ok(request) = requests.recv() else {
+                return Ok(());
+            };
+            enqueue(&mut queue, request)?;
+            continue;
+        }
+        while let Ok(request) = requests.try_recv() {
+            enqueue(&mut queue, request)?;
+        }
+        let Some(job) = queue.pop_front() else {
+            continue;
+        };
+        idle_reported = false;
+
+        let initial = GameState::from_ascii(&job.map)?;
+        let id = job.id.clone();
+        let max_states = job.options.max_states;
+        sender.send(WorkerEvent::Solving(
+            id.clone(),
+            SolveStats::default(),
+            max_states,
+        ))?;
+        let mut deferred = Vec::new();
+        let mut superseded = false;
+        let result = solve_cancellable(&initial, job.options, |stats| {
+            let _ = sender.send(WorkerEvent::Solving(id.clone(), stats, max_states));
+            while let Ok(request) = requests.try_recv() {
+                match request {
+                    Request::Cancel => return ControlFlow::Break(()),
+                    Request::Solve {
+                        id: ref requested, ..
+                    } if *requested == id => {
+                        superseded = true;
+                        deferred.push(request);
+                        return ControlFlow::Break(());
+                    }
+                    request => deferred.push(request),
+                }
+            }
+            ControlFlow::Continue(())
+        });
+        for request in deferred {
+            enqueue(&mut queue, request)?;
+        }
+        let Some(result) = result else {
+            if !superseded {
+                sender.send(WorkerEvent::Cancelled(id))?;
+            }
+            continue;
+        };
+        let record =
+            SolverCacheRecord::from_result(&id, &job.map, job.options, &fingerprint, &result);
         record.save(&solver_dir.join(format!("{id}.json")))?;
         let event = match result.outcome {
             SolveOutcome::Solved(inputs) => WorkerEvent::Solved(id, inputs, false, result.stats),
@@ -304,8 +463,6 @@ fn worker_inner(paths: &ProjectPaths, sender: &Sender<WorkerEvent>) -> Result<()
         };
         sender.send(event)?;
     }
-    sender.send(WorkerEvent::Finished)?;
-    Ok(())
 }
 
 fn stats(record: &SolverCacheRecord) -> SolveStats {
@@ -414,7 +571,9 @@ fn draw(frame: &mut Frame, dashboard: &mut Dashboard) {
         areas[2],
     );
     frame.render_widget(
-        Paragraph::new("Up/Down or J/K: select  Enter: replay solved level  Q/Esc: quit")
+        Paragraph::new(
+            "J/K: select  Enter: replay  R: re-solve  U: re-solve without state limit  C: cancel solve  Q: quit",
+        )
             .style(Style::default().fg(Color::Gray)),
         areas[3],
     );
@@ -425,7 +584,12 @@ fn solve_label(status: &SolveView) -> String {
         SolveView::NotApplicable => "—".to_owned(),
         SolveView::CheckingCache => "Checking cache".to_owned(),
         SolveView::Queued => "Queued".to_owned(),
-        SolveView::Solving(stats) => format!("Solving ({} states)", stats.discovered_states),
+        SolveView::Solving(stats, max_states) => format!(
+            "Solving ({} states, {})",
+            stats.discovered_states,
+            limit_label(*max_states)
+        ),
+        SolveView::Cancelled => "Cancelled".to_owned(),
         SolveView::Solved {
             input_count,
             cached,
@@ -444,6 +608,13 @@ fn solve_label(status: &SolveView) -> String {
     }
 }
 
+fn limit_label(max_states: Option<usize>) -> String {
+    match max_states {
+        Some(limit) => format!("limit {limit}"),
+        None => "no limit".to_owned(),
+    }
+}
+
 fn detail_text(row: &LevelRow, pipeline_message: &str) -> Text<'static> {
     let mut lines = vec![Line::from(format!(
         "{} — {}",
@@ -451,7 +622,7 @@ fn detail_text(row: &LevelRow, pipeline_message: &str) -> Text<'static> {
         solve_label(&row.solve)
     ))];
     let stats = match row.solve {
-        SolveView::Solving(stats)
+        SolveView::Solving(stats, _)
         | SolveView::Solved { stats, .. }
         | SolveView::Unsolvable { stats, .. }
         | SolveView::LimitReached { stats, .. } => Some(stats),
@@ -522,6 +693,54 @@ mod tests {
         ));
         assert_eq!(dashboard.rows[0].inputs.as_ref().unwrap().len(), 2);
         assert!(matches!(dashboard.rows[1].solve, SolveView::NotApplicable));
+    }
+
+    #[test]
+    fn solve_requests_keep_the_old_solution_until_replaced_or_cancelled() {
+        let mut dashboard = Dashboard::loading();
+        dashboard.apply(WorkerEvent::Imported(ProjectImport {
+            levels: vec![level("1", true), level("2", false)],
+            expected_count: 2,
+        }));
+        let stats = SolveStats::default();
+        dashboard.apply(WorkerEvent::Solved(
+            "1".to_owned(),
+            vec![GameInput::Right],
+            true,
+            stats,
+        ));
+
+        let unlimited = SolveOptions { max_states: None };
+        let Some(Request::Solve { id, options }) = dashboard.request_solve(unlimited) else {
+            panic!("clean levels can be re-solved");
+        };
+        assert_eq!((id.as_str(), options), ("1", unlimited));
+        assert!(matches!(dashboard.rows[0].solve, SolveView::Queued));
+        assert!(dashboard.rows[0].inputs.is_some());
+
+        dashboard.apply(WorkerEvent::Solving("1".to_owned(), stats, None));
+        assert_eq!(
+            solve_label(&dashboard.rows[0].solve),
+            "Solving (0 states, no limit)"
+        );
+        dashboard.apply(WorkerEvent::Cancelled("1".to_owned()));
+        assert!(matches!(
+            dashboard.rows[0].solve,
+            SolveView::Solved { cached: true, .. }
+        ));
+
+        dashboard.request_solve(SolveOptions::default());
+        dashboard.apply(WorkerEvent::Unsolvable("1".to_owned(), false, stats));
+        assert!(dashboard.rows[0].inputs.is_none());
+        dashboard.request_solve(SolveOptions::default());
+        dashboard.apply(WorkerEvent::Cancelled("1".to_owned()));
+        assert!(matches!(
+            dashboard.rows[0].solve,
+            SolveView::Unsolvable { cached: false, .. }
+        ));
+
+        dashboard.selected = 1;
+        assert!(dashboard.request_solve(SolveOptions::default()).is_none());
     }
 
     #[test]

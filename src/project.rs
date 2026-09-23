@@ -339,10 +339,20 @@ impl SolverCacheRecord {
         options: SolveOptions,
         fingerprint: &str,
     ) -> bool {
-        !matches!(self.outcome, CachedSolveOutcome::Solved { .. })
+        // An exhausted search is final under any limit, and hitting a limit at
+        // least as large as the requested one would happen again.
+        let limit_covers = match self.outcome {
+            CachedSolveOutcome::Solved { .. } => return false,
+            CachedSolveOutcome::Unsolvable => true,
+            CachedSolveOutcome::StateLimitReached => match (self.max_states, options.max_states) {
+                (None, _) => true,
+                (Some(_), None) => false,
+                (Some(cached), Some(requested)) => cached >= requested,
+            },
+        };
+        limit_covers
             && self.level_id == level_id
             && self.map == current_map
-            && self.max_states == options.max_states
             && self.executable_fingerprint == fingerprint
     }
 }
@@ -470,5 +480,18 @@ mod tests {
         };
         assert!(failed.reusable_failure("1", map, SolveOptions::default(), "old"));
         assert!(!failed.reusable_failure("1", map, SolveOptions::default(), "new"));
+        let unlimited = SolveOptions { max_states: None };
+        assert!(!failed.reusable_failure("1", map, unlimited, "old"));
+        let small = SolveOptions {
+            max_states: Some(10),
+        };
+        assert!(failed.reusable_failure("1", map, small, "old"));
+
+        let exhausted_without_limit = SolverCacheRecord {
+            outcome: CachedSolveOutcome::Unsolvable,
+            max_states: None,
+            ..failed
+        };
+        assert!(exhausted_without_limit.reusable_failure("1", map, SolveOptions::default(), "old"));
     }
 }
