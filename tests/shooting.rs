@@ -132,6 +132,80 @@ fn projectile_destroyed_on_a_skull_does_not_spawn_the_player_cube() {
 }
 
 #[test]
+fn projectiles_pass_through_glass_cubes() {
+    let fired = game(
+        r#"
+#######
+#@ g  #
+#######
+"#,
+    )
+    .step(Shoot)
+    .step(Right)
+    .step(Wait);
+
+    assert_eq!(fired.to_ascii(), level("#######\n#@ g O#\n#######"));
+}
+
+#[test]
+fn projectile_stopping_inside_a_glass_cube_does_not_spawn_the_player_cube() {
+    let fired = game(
+        r#"
+#####
+#@g##
+#####
+"#,
+    )
+    .step(Shoot)
+    .step(Right);
+
+    assert!(fired.projectile().is_none());
+    assert_eq!(fired.cubes().len(), 1);
+    assert_eq!(fired.cubes()[0].source, CubeSource::Glass);
+    assert_eq!(fired.player().mode, PlayerMode::Recovering);
+}
+
+#[test]
+fn falling_glass_cubes_do_not_block_projectiles() {
+    let fired = game(
+        r#"
+######
+#  g #
+#    #
+#@   #
+######
+"#,
+    )
+    .step(Shoot)
+    .step(Right)
+    .step(Wait);
+
+    assert_eq!(fired.symbol_at(Position { x: 4, y: 3 }), 'O');
+    assert_eq!(fired.symbol_at(Position { x: 3, y: 3 }), 'g');
+}
+
+#[test]
+fn glass_cubes_survive_new_shots_and_can_be_pushed() {
+    let pushed = game(
+        r#"
+#######
+#@g   #
+#######
+"#,
+    )
+    .step(Right);
+    assert_eq!(pushed.to_ascii(), level("#######\n# @g  #\n#######"));
+
+    let reshot = game("#######\n#@ O g#\n#######")
+        .step(Shoot)
+        .step(Right)
+        .step(Wait);
+    assert_eq!(reshot.cubes().len(), 1);
+    assert_eq!(reshot.symbol_at(Position { x: 5, y: 1 }), 'g');
+    assert!(reshot.projectile().is_none());
+}
+
+#[test]
 fn recovery_ignores_actions_for_exactly_one_update_but_moves_the_projectile() {
     let fired = game(
         r#"

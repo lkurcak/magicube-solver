@@ -41,6 +41,7 @@ pub fn assert_cube_layout_eq(actual: &[Cube], expected: &[Cube]) {
         let source = match cube.source {
             CubeSource::Map => 0,
             CubeSource::Player => 1,
+            CubeSource::Glass => 2,
         };
         (cube.position.y, cube.position.x, source)
     }

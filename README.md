@@ -348,7 +348,7 @@ compares the complete dynamic state while omitting the shared level from hashing
 Movement updates work as follows:
 
 - Left/right attempt to move one tile. `#` walls, `G` goal pedestals, `P`
-  pressure-plate bases, closed `D` gates, and both kinds of cube are solid
+  pressure-plate bases, closed `D` gates, and every kind of cube are solid
   and block the player. A cube supports the player only when its vertical stack
   is itself supported. Walking into a cube pushes the entire contiguous row
   of cubes one tile, provided the player is grounded and the space beyond it is
@@ -382,7 +382,8 @@ and preserves the previous cube and projectile. The adjacent tile must be
 unoccupied and passable before firing (empty, torch, skull, or an inactive gate).
 A derived goal or pressure-plate position is otherwise an ordinary empty cell.
 A successful shot immediately removes the
-previous `O` cube and replaces any previous projectile, leaving map cubes intact.
+previous `O` cube and replaces any previous projectile, leaving map and glass
+cubes intact.
 
 A successful shot sets `player().mode` to `PlayerMode::Recovering`. The next
 update ignores player actions (including jump and shoot), advances projectiles,
@@ -398,8 +399,10 @@ including its starting, intermediate, and destination tiles. This transient
 occupancy affects projectile collision only. Derived goal and pressure-plate
 positions, torches, and skulls are passable; walls, feature bases, unknown
 terrain, and occupied tiles stop a projectile and create an `O` cube in its
-last free position. If that position is a skull, the projectile is destroyed
-without creating the cube. After projectile movement, gravity runs in two
+last free position. `g` glass cubes behave like map cubes except that
+projectiles pass through them, including through their gravity sweep. If the
+projectile's last position is a skull or a glass cube, the projectile is
+destroyed without creating the cube. After projectile movement, gravity runs in two
 single-tile substeps for both player and cubes, processing lower bodies first.
 This lets stacks fall together and prevents cubes from skipping through platforms,
 skulls, or the player. Newly spawned cubes participate in gravity immediately.
@@ -421,7 +424,7 @@ repeat: space above the top and beyond either horizontal edge is empty. Torches
 are decorative. Skulls are passable for players and projectiles but act as walls
 for cubes. `to_ascii()` renders only the original map rectangle, so use
 `player().position` to inspect a player outside it.
-Maps require exactly one `@` and can include map cubes (`C`), at most one existing
+Maps require exactly one `@` and can include map cubes (`C`), glass cubes (`g`), at most one existing
 player cube (`O`), gates (`D`), goal pedestals (`G`), and pressure-plate bases
 (`P`). Ragged
 rows are padded with empty tiles, matching the screenshot importer's format.

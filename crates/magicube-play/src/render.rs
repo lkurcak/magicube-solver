@@ -279,6 +279,7 @@ fn draw_board(
                 'D' => Color::DarkGrey,
                 'P' => Color::Yellow,
                 'C' => Color::Blue,
+                'g' => Color::DarkCyan,
                 'O' if level.is_goal(position) => Color::Green,
                 'O' => Color::Magenta,
                 '<' | '>' => Color::Yellow,

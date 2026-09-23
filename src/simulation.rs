@@ -48,6 +48,8 @@ pub enum PlayerMode {
 pub enum CubeSource {
     Map,
     Player,
+    /// A map cube that projectiles pass through.
+    Glass,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -208,8 +210,8 @@ pub struct GameState {
 impl GameState {
     /// Parses the importer's map alphabet, with exactly one `@` player.
     ///
-    /// `C` creates a map cube; `O` creates the player's existing cube (at most
-    /// one). Short rows are padded with empty tiles. Indentation is significant;
+    /// `C` creates a map cube; `g` creates a glass map cube that projectiles pass
+    /// through; `O` creates the player's existing cube (at most one). Short rows are padded with empty tiles. Indentation is significant;
     /// trailing line endings are allowed. `G` goal pedestals and `P` pressure-plate
     /// bases are solid; their interactive positions are one tile above. Torches
     /// are passable for all bodies and projectiles. Skulls are passable for the
@@ -257,11 +259,11 @@ impl GameState {
                     'S' => Tile::Skull,
                     't' => Tile::Torch,
                     '?' => Tile::Unknown,
-                    'C' | 'O' => {
-                        let source = if symbol == 'C' {
-                            CubeSource::Map
-                        } else {
-                            CubeSource::Player
+                    'C' | 'g' | 'O' => {
+                        let source = match symbol {
+                            'C' => CubeSource::Map,
+                            'g' => CubeSource::Glass,
+                            _ => CubeSource::Player,
                         };
                         if source == CubeSource::Player
                             && cubes.iter().any(|cube| cube.source == CubeSource::Player)
@@ -522,11 +524,16 @@ impl GameState {
         next
     }
 
+    /// Glass cubes are solid bodies but let projectiles pass through.
     fn blocks_projectile(&self, position: Position) -> bool {
         !matches!(
             self.level.tile_at(position),
             Tile::Empty | Tile::Gate | Tile::Skull | Tile::Torch
-        ) || self.is_solid(position)
+        ) || self.is_solid_tile(position)
+            || self
+                .cubes
+                .iter()
+                .any(|cube| cube.position == position && cube.source != CubeSource::Glass)
             || position == self.player.position
     }
 
@@ -539,7 +546,7 @@ impl GameState {
         if self.blocks_projectile(adjacent) {
             return false;
         }
-        self.cubes.retain(|cube| cube.source == CubeSource::Map);
+        self.cubes.retain(|cube| cube.source != CubeSource::Player);
         self.projectile = Some(Projectile {
             position: self.player.position,
             direction,
@@ -552,7 +559,13 @@ impl GameState {
         for _ in 0..self.settings.projectile_tiles_per_update {
             let target = projectile.position.offset(projectile.direction.dx(), 0);
             if self.blocks_projectile(target) || swept_cube_positions.contains(&target) {
-                if self.level.tile_at(projectile.position) != Tile::Skull {
+                // The cube cannot spawn inside a skull or a glass cube.
+                if self.level.tile_at(projectile.position) != Tile::Skull
+                    && !self
+                        .cubes
+                        .iter()
+                        .any(|cube| cube.position == projectile.position)
+                {
                     let spawned_cube = self.cubes.len();
                     self.cubes.push(Cube {
                         position: projectile.position,
@@ -571,7 +584,7 @@ impl GameState {
         None
     }
 
-    /// Tiles occupied by cubes at any point during this update's gravity pass.
+    /// Tiles occupied by opaque cubes at any point during this update's gravity pass.
     /// This preview does not mutate the real state. It lets projectile collision
     /// treat a falling cube as occupying its complete vertical sweep while all
     /// other physics continues to use the cube's canonical position.
@@ -580,7 +593,12 @@ impl GameState {
             return Vec::new();
         }
         let mut preview = self.clone();
-        let mut swept: Vec<_> = preview.cubes.iter().map(|cube| cube.position).collect();
+        let mut swept: Vec<_> = preview
+            .cubes
+            .iter()
+            .filter(|cube| cube.source != CubeSource::Glass)
+            .map(|cube| cube.position)
+            .collect();
         preview.apply_gravity_recording(false, Some(&mut swept), None);
         swept
     }
@@ -623,7 +641,10 @@ impl GameState {
                             .wrap_below(self.cubes[index].position.offset(0, 1));
                         if !self.is_solid_for_cube_ignoring_plate_cube(target, ignored_plate_cube) {
                             self.cubes[index].position = target;
-                            if let Some(swept) = swept_cube_positions.as_deref_mut() {
+                            if let Some(swept) = swept_cube_positions
+                                .as_deref_mut()
+                                .filter(|_| self.cubes[index].source != CubeSource::Glass)
+                            {
                                 swept.push(target);
                             }
                             if target == self.player.position {
@@ -668,6 +689,7 @@ impl GameState {
             match cube.source {
                 CubeSource::Map => 'C',
                 CubeSource::Player => 'O',
+                CubeSource::Glass => 'g',
             }
         } else if let Some(projectile) = self.projectile.filter(|p| p.position == position) {
             match projectile.direction {

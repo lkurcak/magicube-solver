@@ -16,6 +16,9 @@ t ../tiles-manual/torch4.png
 C ../tiles-manual/cube.png
 C ../tiles-manual/cube2.png
 C ../tiles-manual/cube3.png
+g ../tiles-manual/glass.png
+g ../tiles-manual/glass2.png
+g ../tiles-manual/glass3.png
 D ../tiles-manual/gate.png
 D ../tiles-manual/gate2.png
 D ../tiles-manual/gate3.png
