@@ -7,6 +7,21 @@ use std::path::{Path, PathBuf};
 
 pub const TILE_SIZE: u32 = 8;
 const MAX_NOISE_PIXELS: usize = 3;
+/// The "LEVEL" caption of the in-game HUD in its 3x5 pixel font.
+const HUD_CAPTION: [&str; 5] = [
+    "#...###.#.#.###.#",
+    "#...#...#.#.#...#",
+    "#...##..#.#.##..#",
+    "#...#...###.#...#",
+    "###.###..#..###.###",
+];
+const HUD_GLYPH_ADVANCE: u32 = 4;
+const HUD_MAX_DIGITS: u32 = 3;
+/// The HUD's black box extends past the caption by this many pixels.
+const HUD_PADDING_RIGHT: u32 = 3;
+const HUD_PADDING_BOTTOM: u32 = 1;
+/// What a HUD-covered cell is assumed to be when its visible pixels are inconclusive.
+const HIDDEN_SYMBOL: char = '#';
 
 #[derive(Debug)]
 pub struct Atlas {
@@ -38,12 +53,40 @@ pub struct ImportedLevel {
     pub unknown_tiles: Vec<UnknownTile>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrainingSummary {
     pub grid_offset_x: usize,
     pub grid_offset_y: usize,
     pub anchor_matches: usize,
     pub learned_variants: usize,
+    /// Labels of cells covered by the HUD. They describe only this screenshot,
+    /// so they are not learned as templates.
+    pub occluded_labels: Vec<OccludedLabel>,
+}
+
+/// A manual label for a HUD-covered cell, in screenshot grid coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OccludedLabel {
+    pub grid_x: usize,
+    pub grid_y: usize,
+    pub symbol: char,
+    pub label_x: usize,
+    pub label_y: usize,
+}
+
+/// Candidate symbols for a HUD-covered tile, judged by its visible pixels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VisibleMatch {
+    Unique(char),
+    Ambiguous(Vec<char>),
+    None,
+}
+
+/// Inclusive pixel bounds of the HUD's black box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Occlusion {
+    right: u32,
+    bottom: u32,
 }
 
 #[derive(Debug)]
@@ -219,6 +262,37 @@ impl Atlas {
         ))
     }
 
+    /// Match only the pixels outside the HUD. With nothing visible, every
+    /// template matches.
+    fn classify_occluded(&self, tile: &RgbaImage, visible: &[bool]) -> VisibleMatch {
+        let visible_equal = |template: &RgbaImage| {
+            tile.pixels()
+                .zip(template.pixels())
+                .zip(visible)
+                .all(|((left, right), &visible)| !visible || left.0[..3] == right.0[..3])
+        };
+        let mut symbols = self
+            .templates
+            .iter()
+            .filter(|template| visible_equal(&template.image))
+            .map(|template| template.symbol)
+            .collect::<Vec<_>>();
+        if tile
+            .pixels()
+            .zip(visible)
+            .all(|(pixel, &visible)| !visible || pixel.0[..3] == [0, 0, 0])
+        {
+            symbols.push(' ');
+        }
+        symbols.sort_unstable();
+        symbols.dedup();
+        match symbols[..] {
+            [] => VisibleMatch::None,
+            [symbol] => VisibleMatch::Unique(symbol),
+            _ => VisibleMatch::Ambiguous(symbols),
+        }
+    }
+
     pub fn learn_labeled_level(
         &mut self,
         image: &RgbaImage,
@@ -296,10 +370,23 @@ impl Atlas {
         }
         let (offset_x, offset_y) = placements[0];
 
+        let occlusions = detect_hud_occlusions(image);
         let mut learned_variants = 0;
+        let mut occluded_labels = Vec::new();
         for (y, row) in rows.iter().enumerate() {
             for (x, &symbol) in row.iter().enumerate() {
                 if symbol == '?' {
+                    continue;
+                }
+                let (grid_x, grid_y) = (offset_x + x, offset_y + y);
+                if tile_visibility(xs[grid_x], ys[grid_y], &occlusions).is_some() {
+                    occluded_labels.push(OccludedLabel {
+                        grid_x,
+                        grid_y,
+                        symbol,
+                        label_x: x,
+                        label_y: y,
+                    });
                     continue;
                 }
                 let tile = imageops::crop_imm(
@@ -328,6 +415,7 @@ impl Atlas {
             grid_offset_y: offset_y,
             anchor_matches: best_score,
             learned_variants,
+            occluded_labels,
         })
     }
 }
@@ -339,7 +427,18 @@ pub fn load_png(path: &Path) -> Result<RgbaImage, Box<dyn Error>> {
 }
 
 pub fn import_level(image: &RgbaImage, atlas: &Atlas) -> Result<ImportedLevel, Box<dyn Error>> {
+    import_level_with_labels(image, atlas, &[])
+}
+
+/// Import a screenshot, resolving HUD-covered cells from their visible pixels
+/// and, where those are inconclusive, from this screenshot's manual labels.
+pub fn import_level_with_labels(
+    image: &RgbaImage,
+    atlas: &Atlas,
+    occluded_labels: &[OccludedLabel],
+) -> Result<ImportedLevel, Box<dyn Error>> {
     let phase = detect_grid_phase(image, atlas.anchor())?;
+    let occlusions = detect_hud_occlusions(image);
     let mut rows = Vec::new();
     let mut unknown: BTreeMap<u64, UnknownTile> = BTreeMap::new();
 
@@ -349,7 +448,15 @@ pub fn import_level(image: &RgbaImage, atlas: &Atlas) -> Result<ImportedLevel, B
         let mut row = Vec::new();
         for (grid_x, &pixel_x) in xs.iter().enumerate() {
             let tile = imageops::crop_imm(image, pixel_x, pixel_y, TILE_SIZE, TILE_SIZE).to_image();
-            let classification = atlas.classify(&tile);
+            let classification = match tile_visibility(pixel_x, pixel_y, &occlusions) {
+                None => atlas.classify(&tile),
+                Some(visible) => {
+                    let label = occluded_labels
+                        .iter()
+                        .find(|label| (label.grid_x, label.grid_y) == (grid_x, grid_y));
+                    resolve_occluded(atlas.classify_occluded(&tile, &visible), label)
+                }
+            };
             let symbol = if let Ok(Some(symbol)) = classification {
                 symbol
             } else {
@@ -395,6 +502,110 @@ pub fn import_level(image: &RgbaImage, atlas: &Atlas) -> Result<ImportedLevel, B
         height: trimmed.height,
         unknown_tiles: unknown.into_values().collect(),
     })
+}
+
+/// Labels take precedence over guesses. Cells the visible pixels cannot decide
+/// are assumed to be walls, as long as a wall fits what is visible.
+fn resolve_occluded(
+    visible_match: VisibleMatch,
+    label: Option<&OccludedLabel>,
+) -> Result<Option<char>, String> {
+    match (visible_match, label) {
+        (VisibleMatch::Unique(symbol), Some(label)) if symbol != label.symbol => Err(format!(
+            "occluded by the level HUD: visible pixels match {symbol:?}, but the label at ({}, {}) is {:?}",
+            label.label_x, label.label_y, label.symbol
+        )),
+        (VisibleMatch::Unique(symbol), _) => Ok(Some(symbol)),
+        (_, Some(label)) => Ok(Some(label.symbol)),
+        (VisibleMatch::Ambiguous(symbols), None) if symbols.contains(&HIDDEN_SYMBOL) => {
+            Ok(Some(HIDDEN_SYMBOL))
+        }
+        (VisibleMatch::Ambiguous(symbols), None) => Err(format!(
+            "occluded by the level HUD: visible pixels match {}; label this cell",
+            symbols
+                .iter()
+                .map(|symbol| format!("{symbol:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        (VisibleMatch::None, None) => Err(
+            "occluded by the level HUD: visible pixels match no template; label this cell"
+                .to_owned(),
+        ),
+    }
+}
+
+/// Find the black boxes drawn behind "LEVEL <number>" captions.
+fn detect_hud_occlusions(image: &RgbaImage) -> Vec<Occlusion> {
+    let caption_width = HUD_CAPTION.iter().map(|row| row.len()).max().unwrap() as u32;
+    let caption_height = HUD_CAPTION.len() as u32;
+    if image.width() < caption_width || image.height() < caption_height {
+        return Vec::new();
+    }
+
+    let mut occlusions = Vec::new();
+    for y in 0..=image.height() - caption_height {
+        for x in 0..=image.width() - caption_width {
+            let ink = *image.get_pixel(x, y);
+            let is_caption = (0..caption_height).all(|dy| {
+                let row = HUD_CAPTION[dy as usize].as_bytes();
+                (0..caption_width).all(|dx| {
+                    let pixel = image.get_pixel(x + dx, y + dy);
+                    if row.get(dx as usize) == Some(&b'#') {
+                        *pixel == ink
+                    } else {
+                        pixel.0[..3] == [0, 0, 0]
+                    }
+                })
+            });
+            if !is_caption || ink.0[..3] == [0, 0, 0] {
+                continue;
+            }
+
+            // Digits follow one blank glyph. Count glyphs drawn purely in ink on black.
+            let digits_x = x + caption_width + 1 + HUD_GLYPH_ADVANCE;
+            let digits = (0..HUD_MAX_DIGITS)
+                .take_while(|digit| {
+                    let glyph_x = digits_x + digit * HUD_GLYPH_ADVANCE;
+                    let pixels = (0..caption_height)
+                        .flat_map(|dy| {
+                            (0..HUD_GLYPH_ADVANCE - 1).map(move |dx| (glyph_x + dx, y + dy))
+                        })
+                        .filter(|&(px, py)| px < image.width() && py < image.height())
+                        .map(|(px, py)| *image.get_pixel(px, py))
+                        .collect::<Vec<_>>();
+                    pixels.len() == ((HUD_GLYPH_ADVANCE - 1) * caption_height) as usize
+                        && pixels.contains(&ink)
+                        && pixels
+                            .iter()
+                            .all(|pixel| *pixel == ink || pixel.0[..3] == [0, 0, 0])
+                })
+                .count() as u32;
+            let text_right = if digits == 0 {
+                x + caption_width - 1
+            } else {
+                digits_x + digits * HUD_GLYPH_ADVANCE - 2
+            };
+            occlusions.push(Occlusion {
+                right: text_right + HUD_PADDING_RIGHT,
+                bottom: y + caption_height - 1 + HUD_PADDING_BOTTOM,
+            });
+        }
+    }
+    occlusions
+}
+
+/// Row-major visibility of a tile's pixels, or `None` when nothing covers it.
+fn tile_visibility(pixel_x: u32, pixel_y: u32, occlusions: &[Occlusion]) -> Option<Vec<bool>> {
+    let visible = (0..TILE_SIZE)
+        .flat_map(|dy| (0..TILE_SIZE).map(move |dx| (pixel_x + dx, pixel_y + dy)))
+        .map(|(x, y)| {
+            !occlusions
+                .iter()
+                .any(|occlusion| x <= occlusion.right && y <= occlusion.bottom)
+        })
+        .collect::<Vec<_>>();
+    visible.contains(&false).then_some(visible)
 }
 
 pub fn detect_grid_phase(
@@ -720,6 +931,115 @@ mod tests {
             imageops::replace(&mut screenshot, &test_tile(i + 1), i64::from(i) * 8, 0);
         }
         screenshot
+    }
+
+    /// Row 0 holds void, '@', '#', an unknown tile and two walls; row 1 is
+    /// all walls. A "LEVEL 88" HUD box then covers pixels x <= 34, y <= 6.
+    fn hud_screenshot() -> RgbaImage {
+        let mut screenshot = RgbaImage::new(48, 16);
+        for (x, seed) in [None, Some(2), Some(1), Some(9), Some(1), Some(1)]
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(seed) = seed {
+                imageops::replace(&mut screenshot, &test_tile(seed), x as i64 * 8, 0);
+            }
+            imageops::replace(&mut screenshot, &test_tile(1), x as i64 * 8, 8);
+        }
+        let ink = Rgba([255, 241, 232, 255]);
+        for y in 0_u32..=6 {
+            for x in 0_u32..=34 {
+                let caption = HUD_CAPTION
+                    .get(y.wrapping_sub(1) as usize)
+                    .and_then(|row| row.as_bytes().get(x.wrapping_sub(1) as usize));
+                let digit = (1..=5).contains(&y) && matches!(x, 25..=27 | 29..=31);
+                let pixel = if caption == Some(&b'#') || digit {
+                    ink
+                } else {
+                    Rgba([0, 0, 0, 255])
+                };
+                screenshot.put_pixel(x, y, pixel);
+            }
+        }
+        screenshot
+    }
+
+    #[test]
+    fn detects_the_hud_box_from_its_caption_and_digits() {
+        assert_eq!(
+            detect_hud_occlusions(&hud_screenshot()),
+            [Occlusion {
+                right: 34,
+                bottom: 6,
+            }]
+        );
+        assert!(detect_hud_occlusions(&test_screenshot()).is_empty());
+    }
+
+    #[test]
+    fn hud_covered_cells_are_matched_by_their_visible_pixels() {
+        let imported = import_level(&hud_screenshot(), &test_atlas()).unwrap();
+        assert_eq!(imported.map, " @#?##\n######");
+        assert_eq!(imported.unknown_tiles.len(), 1);
+        assert_eq!(imported.unknown_tiles[0].positions, [(3, 0)]);
+        assert!(
+            imported.unknown_tiles[0]
+                .reason
+                .contains("occluded by the level HUD")
+        );
+    }
+
+    #[test]
+    fn inconclusive_hud_covered_cells_are_assumed_to_be_walls() {
+        let atlas = test_atlas();
+        let hidden = atlas.classify_occluded(&test_tile(9), &[false; 64]);
+        assert_eq!(resolve_occluded(hidden, None), Ok(Some('#')));
+
+        let without_walls = Atlas {
+            templates: atlas.templates[1..]
+                .iter()
+                .map(|template| Template {
+                    symbol: template.symbol,
+                    name: template.name.clone(),
+                    image: template.image.clone(),
+                })
+                .collect(),
+            anchor_index: 0,
+            template_paths: Vec::new(),
+        };
+        let hidden = without_walls.classify_occluded(&test_tile(9), &[false; 64]);
+        assert!(resolve_occluded(hidden, None).is_err());
+    }
+
+    #[test]
+    fn labels_resolve_hud_covered_cells_without_training_the_atlas() {
+        let mut atlas = test_atlas();
+        let screenshot = hud_screenshot();
+        let summary = atlas
+            .learn_labeled_level_from(&screenshot, " @#t##\n######", "hud.txt")
+            .unwrap();
+        assert_eq!(summary.learned_variants, 0);
+        assert_eq!(summary.occluded_labels.len(), 5);
+        assert_eq!(
+            import_level(&screenshot, &atlas).unwrap().map,
+            " @#?##\n######"
+        );
+        let imported =
+            import_level_with_labels(&screenshot, &atlas, &summary.occluded_labels).unwrap();
+        assert_eq!(imported.map, " @#t##\n######");
+        assert!(imported.unknown_tiles.is_empty());
+
+        let summary = atlas
+            .learn_labeled_level_from(&screenshot, "#@#t##\n######", "wrong.txt")
+            .unwrap();
+        let imported =
+            import_level_with_labels(&screenshot, &atlas, &summary.occluded_labels).unwrap();
+        assert_eq!(imported.map, "?@#t##\n######");
+        assert!(
+            imported.unknown_tiles[0]
+                .reason
+                .contains("label at (0, 0) is '#'")
+        );
     }
 
     #[test]

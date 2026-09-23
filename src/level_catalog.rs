@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::GameState;
-use crate::screenshot_import::{Atlas, ImportedLevel, import_level, load_png, png_files};
+use crate::screenshot_import::{
+    Atlas, ImportedLevel, import_level_with_labels, load_png, png_files,
+};
 
 #[derive(Debug)]
 pub struct LevelCatalog {
@@ -76,18 +78,20 @@ pub fn generate_catalog(
             }
         };
         let label_path = labels_dir.join(format!("{}.txt", entry.id));
+        let mut occluded_labels = Vec::new();
         match fs::read_to_string(&label_path) {
             Ok(labels) => {
-                if let Some(image) = &image
-                    && let Err(error) = atlas.learn_labeled_level_from(
+                if let Some(image) = &image {
+                    match atlas.learn_labeled_level_from(
                         image,
                         &labels,
                         &label_path.display().to_string(),
-                    )
-                {
-                    entry
-                        .issues
-                        .push(format!("{}: {error}", label_path.display()));
+                    ) {
+                        Ok(summary) => occluded_labels = summary.occluded_labels,
+                        Err(error) => entry
+                            .issues
+                            .push(format!("{}: {error}", label_path.display())),
+                    }
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -95,14 +99,14 @@ pub fn generate_catalog(
                 .issues
                 .push(format!("{}: {error}", label_path.display())),
         }
-        sources.push((entry, image));
+        sources.push((entry, image, occluded_labels));
     }
 
     let entries = sources
         .into_iter()
-        .map(|(mut entry, image)| {
+        .map(|(mut entry, image, occluded_labels)| {
             if let Some(image) = image {
-                match import_level(&image, &atlas) {
+                match import_level_with_labels(&image, &atlas, &occluded_labels) {
                     Ok(imported) => {
                         for tile in &imported.unknown_tiles {
                             entry.issues.push(format!(

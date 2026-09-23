@@ -26,6 +26,16 @@ before any level is imported, so one new example can repair multiple levels.
 Explicit spaces in a labeled line are meaningful; `?` and omitted trailing spaces
 are not trained. A label file without a matching screenshot is not used.
 
+Some screenshots include the in-game `LEVEL <number>` caption, whose black box
+hides the tiles beneath it. The importer finds the caption by its pixel font and
+treats every cell touching the box as occluded. Occluded cells are matched using
+only their visible pixels and resolve when all matching templates agree on one
+character. If the visible pixels are inconclusive but consistent with a wall, the
+cell is assumed to be a wall; if they match no template, it stays unresolved. A
+label in that level's manual map takes precedence over the wall assumption. Labels
+of occluded cells apply only to their own screenshot and are never learned as
+templates; a label that contradicts the visible pixels is reported.
+
 The atlas and manual level labels are both authoritative. If identical pixels
 have conflicting labels, the importer emits `?` and reports the conflicting
 source files and label coordinates instead of choosing one. Black background is
