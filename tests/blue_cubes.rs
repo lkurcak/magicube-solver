@@ -341,3 +341,49 @@ fn blue_cubes_stay_put_when_the_cubes_ahead_are_blocked() {
 "#,
     );
 }
+
+#[test]
+fn blue_cubes_support_only_while_the_player_cube_is_supported_or_they_are_blocked() {
+    // The player cube is in freefall, so the blue cube below the player
+    // falls with it and the player cannot shoot from it.
+    let falling = game(
+        r#"
+#######
+#@  O #
+#b    #
+#     #
+#     #
+#######
+        "#,
+    );
+    assert!(!falling.is_grounded());
+    assert!(!falling.can_shoot());
+    assert_eq!(falling.step(Shoot).to_ascii(), falling.to_ascii());
+
+    // A blue cube resting on terrain stays put while the player cube falls.
+    let blocked = game(
+        r#"
+#######
+#@  O #
+#b    #
+##    #
+#     #
+#######
+        "#,
+    );
+    assert!(blocked.is_grounded());
+    assert!(blocked.can_shoot());
+
+    // Once the player cube lands, the floating blue cube is stable again.
+    let landed = game(
+        r#"
+#######
+#@    #
+#b    #
+#     #
+#   O #
+#######
+        "#,
+    );
+    assert!(landed.is_grounded());
+}

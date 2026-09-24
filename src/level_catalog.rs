@@ -227,7 +227,7 @@ mod tests {
             }
         }
         assert!(manual_count >= 8);
-        assert_eq!(catalog.entries.len(), 45);
+        assert_eq!(catalog.entries.len(), 50);
         for id in ["9", "10", "45"] {
             assert!(catalog.entries.iter().any(|entry| entry.id == id));
         }

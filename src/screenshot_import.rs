@@ -1,4 +1,4 @@
-use image::{RgbaImage, imageops};
+use image::{Rgba, RgbaImage, imageops};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
@@ -84,6 +84,21 @@ enum VisibleMatch {
     Unique(char),
     Ambiguous(Vec<char>),
     None,
+}
+
+/// A tile that is only partly visible, and what hides the rest of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PartialTile {
+    visible: Vec<bool>,
+    cause: Occluder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Occluder {
+    /// The level HUD covers part of the tile.
+    Hud,
+    /// The tile extends past the screenshot's edge, and may also be under the HUD.
+    ScreenshotEdge,
 }
 
 /// Inclusive pixel bounds of the HUD's black box.
@@ -340,14 +355,7 @@ impl Atlas {
                             .map(move |(x, _)| (x, y))
                     })
                     .filter(|(x, y)| {
-                        let tile = imageops::crop_imm(
-                            image,
-                            xs[offset_x + x],
-                            ys[offset_y + y],
-                            TILE_SIZE,
-                            TILE_SIZE,
-                        )
-                        .to_image();
+                        let tile = crop_tile(image, xs[offset_x + x], ys[offset_y + y]);
                         tile.as_raw() == self.anchor().as_raw()
                     })
                     .count();
@@ -383,7 +391,7 @@ impl Atlas {
                     continue;
                 }
                 let (grid_x, grid_y) = (offset_x + x, offset_y + y);
-                if tile_visibility(xs[grid_x], ys[grid_y], &occlusions).is_some() {
+                if tile_visibility(image, xs[grid_x], ys[grid_y], &occlusions).is_some() {
                     occluded_labels.push(OccludedLabel {
                         grid_x,
                         grid_y,
@@ -393,14 +401,7 @@ impl Atlas {
                     });
                     continue;
                 }
-                let tile = imageops::crop_imm(
-                    image,
-                    xs[offset_x + x],
-                    ys[offset_y + y],
-                    TILE_SIZE,
-                    TILE_SIZE,
-                )
-                .to_image();
+                let tile = crop_tile(image, xs[grid_x], ys[grid_y]);
                 // An unpressed red base looks like an ordinary base; the empty
                 // cell above it carries the red marker instead.
                 let symbol = match symbol {
@@ -460,14 +461,18 @@ pub fn import_level_with_labels(
     for (grid_y, &pixel_y) in ys.iter().enumerate() {
         let mut row = Vec::new();
         for (grid_x, &pixel_x) in xs.iter().enumerate() {
-            let tile = imageops::crop_imm(image, pixel_x, pixel_y, TILE_SIZE, TILE_SIZE).to_image();
-            let classification = match tile_visibility(pixel_x, pixel_y, &occlusions) {
+            let tile = crop_tile(image, pixel_x, pixel_y);
+            let classification = match tile_visibility(image, pixel_x, pixel_y, &occlusions) {
                 None => atlas.classify(&tile),
-                Some(visible) => {
+                Some(partial) => {
                     let label = occluded_labels
                         .iter()
                         .find(|label| (label.grid_x, label.grid_y) == (grid_x, grid_y));
-                    resolve_occluded(atlas.classify_occluded(&tile, &visible), label)
+                    resolve_occluded(
+                        atlas.classify_occluded(&tile, &partial.visible),
+                        label,
+                        partial.cause,
+                    )
                 }
             };
             let symbol = if let Ok(Some(symbol)) = classification {
@@ -494,7 +499,7 @@ pub fn import_level_with_labels(
         rows.push(row);
     }
     resolve_red_plate_markers(&mut rows, &mut unknown, |grid_x, grid_y| {
-        imageops::crop_imm(image, xs[grid_x], ys[grid_y], TILE_SIZE, TILE_SIZE).to_image()
+        crop_tile(image, xs[grid_x], ys[grid_y])
     });
 
     let trimmed = trim_void(rows)?;
@@ -556,33 +561,41 @@ fn resolve_red_plate_markers(
 }
 
 /// Labels take precedence over guesses. Cells the visible pixels cannot decide
-/// are assumed to be walls, as long as a wall fits what is visible.
+/// are assumed to be walls under the HUD, as long as a wall fits what is visible.
+/// Cells cut off by the screenshot edge are assumed to be void, because
+/// screenshots crop only the black background around the level.
 fn resolve_occluded(
     visible_match: VisibleMatch,
     label: Option<&OccludedLabel>,
+    cause: Occluder,
 ) -> Result<Option<char>, String> {
+    let (cause, fallbacks): (_, &[char]) = match cause {
+        Occluder::Hud => ("occluded by the level HUD", &[HIDDEN_SYMBOL]),
+        Occluder::ScreenshotEdge => ("cut off by the screenshot edge", &[' ', HIDDEN_SYMBOL]),
+    };
     match (visible_match, label) {
         (VisibleMatch::Unique(symbol), Some(label)) if symbol != label.symbol => Err(format!(
-            "occluded by the level HUD: visible pixels match {symbol:?}, but the label at ({}, {}) is {:?}",
+            "{cause}: visible pixels match {symbol:?}, but the label at ({}, {}) is {:?}",
             label.label_x, label.label_y, label.symbol
         )),
         (VisibleMatch::Unique(symbol), _) => Ok(Some(symbol)),
         (_, Some(label)) => Ok(Some(label.symbol)),
-        (VisibleMatch::Ambiguous(symbols), None) if symbols.contains(&HIDDEN_SYMBOL) => {
-            Ok(Some(HIDDEN_SYMBOL))
+        (VisibleMatch::Ambiguous(symbols), None)
+            if let Some(&fallback) = fallbacks.iter().find(|symbol| symbols.contains(symbol)) =>
+        {
+            Ok(Some(fallback))
         }
         (VisibleMatch::Ambiguous(symbols), None) => Err(format!(
-            "occluded by the level HUD: visible pixels match {}; label this cell",
+            "{cause}: visible pixels match {}; label this cell",
             symbols
                 .iter()
                 .map(|symbol| format!("{symbol:?}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
-        (VisibleMatch::None, None) => Err(
-            "occluded by the level HUD: visible pixels match no template; label this cell"
-                .to_owned(),
-        ),
+        (VisibleMatch::None, None) => Err(format!(
+            "{cause}: visible pixels match no template; label this cell"
+        )),
     }
 }
 
@@ -646,17 +659,46 @@ fn detect_hud_occlusions(image: &RgbaImage) -> Vec<Occlusion> {
     occlusions
 }
 
-/// Row-major visibility of a tile's pixels, or `None` when nothing covers it.
-fn tile_visibility(pixel_x: u32, pixel_y: u32, occlusions: &[Occlusion]) -> Option<Vec<bool>> {
-    let visible = (0..TILE_SIZE)
-        .flat_map(|dy| (0..TILE_SIZE).map(move |dx| (pixel_x + dx, pixel_y + dy)))
+/// Row-major visibility of a tile's pixels, or `None` when the whole tile is
+/// inside the screenshot and nothing covers it.
+fn tile_visibility(
+    image: &RgbaImage,
+    pixel_x: i64,
+    pixel_y: i64,
+    occlusions: &[Occlusion],
+) -> Option<PartialTile> {
+    let mut cut_off = false;
+    let visible = (0..TILE_SIZE as i64)
+        .flat_map(|dy| (0..TILE_SIZE as i64).map(move |dx| (pixel_x + dx, pixel_y + dy)))
         .map(|(x, y)| {
+            let (Ok(x), Ok(y)) = (u32::try_from(x), u32::try_from(y)) else {
+                cut_off = true;
+                return false;
+            };
+            if x >= image.width() || y >= image.height() {
+                cut_off = true;
+                return false;
+            }
             !occlusions
                 .iter()
                 .any(|occlusion| x <= occlusion.right && y <= occlusion.bottom)
         })
         .collect::<Vec<_>>();
-    visible.contains(&false).then_some(visible)
+    let cause = if cut_off {
+        Occluder::ScreenshotEdge
+    } else {
+        Occluder::Hud
+    };
+    visible
+        .contains(&false)
+        .then_some(PartialTile { visible, cause })
+}
+
+/// The tile at a possibly out-of-bounds origin, with off-screenshot pixels black.
+fn crop_tile(image: &RgbaImage, pixel_x: i64, pixel_y: i64) -> RgbaImage {
+    let mut tile = RgbaImage::from_pixel(TILE_SIZE, TILE_SIZE, Rgba([0, 0, 0, 255]));
+    imageops::replace(&mut tile, image, -pixel_x, -pixel_y);
+    tile
 }
 
 pub fn detect_grid_phase(
@@ -762,8 +804,15 @@ pub fn save_unknown_tiles(
     Ok(())
 }
 
-fn tile_origins(phase: u32, image_size: u32) -> Vec<u32> {
-    (phase..image_size.saturating_sub(TILE_SIZE - 1))
+/// Origins of every grid cell with at least one pixel inside the screenshot,
+/// including cells cut off by its edges.
+fn tile_origins(phase: u32, image_size: u32) -> Vec<i64> {
+    let first = if phase == 0 {
+        0
+    } else {
+        i64::from(phase) - i64::from(TILE_SIZE)
+    };
+    (first..i64::from(image_size))
         .step_by(TILE_SIZE as usize)
         .collect()
 }
@@ -917,7 +966,6 @@ fn invalid_data(message: impl Into<String>) -> Box<dyn Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::Rgba;
 
     #[test]
     fn detects_phase_from_repeated_anchor() {
@@ -1055,7 +1103,7 @@ mod tests {
     fn inconclusive_hud_covered_cells_are_assumed_to_be_walls() {
         let atlas = test_atlas();
         let hidden = atlas.classify_occluded(&test_tile(9), &[false; 64]);
-        assert_eq!(resolve_occluded(hidden, None), Ok(Some('#')));
+        assert_eq!(resolve_occluded(hidden, None, Occluder::Hud), Ok(Some('#')));
 
         let without_walls = Atlas {
             templates: atlas.templates[1..]
@@ -1070,7 +1118,7 @@ mod tests {
             template_paths: Vec::new(),
         };
         let hidden = without_walls.classify_occluded(&test_tile(9), &[false; 64]);
-        assert!(resolve_occluded(hidden, None).is_err());
+        assert!(resolve_occluded(hidden, None, Occluder::Hud).is_err());
     }
 
     #[test]
@@ -1102,6 +1150,51 @@ mod tests {
                 .reason
                 .contains("label at (0, 0) is '#'")
         );
+    }
+
+    /// '#', '@', 'G' and '#' with the first wall one pixel past the left edge,
+    /// followed by two pixels of black background.
+    fn cropped_screenshot() -> RgbaImage {
+        let mut screenshot = RgbaImage::new(33, 8);
+        for (x, seed) in [1, 2, 3, 1].into_iter().enumerate() {
+            imageops::replace(&mut screenshot, &test_tile(seed), x as i64 * 8 - 1, 0);
+        }
+        screenshot
+    }
+
+    #[test]
+    fn cells_cut_off_by_the_screenshot_edge_are_matched_by_their_visible_pixels() {
+        let imported = import_level(&cropped_screenshot(), &test_atlas()).unwrap();
+        assert_eq!(imported.phase.x, 7);
+        assert_eq!(imported.map, "#@G#");
+        assert!(imported.unknown_tiles.is_empty());
+    }
+
+    #[test]
+    fn inconclusive_cells_cut_off_by_the_edge_are_assumed_to_be_void() {
+        let atlas = test_atlas();
+        let hidden = atlas.classify_occluded(&RgbaImage::new(8, 8), &[false; 64]);
+        assert_eq!(
+            resolve_occluded(hidden, None, Occluder::ScreenshotEdge),
+            Ok(Some(' '))
+        );
+    }
+
+    #[test]
+    fn labels_resolve_cells_cut_off_by_the_edge_without_training_the_atlas() {
+        let mut atlas = test_atlas();
+        let mut screenshot = cropped_screenshot();
+        imageops::replace(&mut screenshot, &test_tile(9), -1, 0);
+        assert_eq!(import_level(&screenshot, &atlas).unwrap().map, "?@G#");
+
+        let summary = atlas
+            .learn_labeled_level_from(&screenshot, "t@G#", "cropped.txt")
+            .unwrap();
+        assert_eq!(summary.learned_variants, 0);
+        assert_eq!(summary.occluded_labels.len(), 1);
+        let imported =
+            import_level_with_labels(&screenshot, &atlas, &summary.occluded_labels).unwrap();
+        assert_eq!(imported.map, "t@G#");
     }
 
     /// Walls, an ordinary plate base, and a red plate top, laid out as rows.

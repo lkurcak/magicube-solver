@@ -644,29 +644,48 @@ impl GameState {
         cube: usize,
         ignored_cube: Option<usize>,
     ) -> bool {
-        if self.cubes[cube].source == CubeSource::Blue {
-            return true;
-        }
-        let mut support = self.level.wrap(self.cubes[cube].position.offset(0, 1));
+        // Blue cubes ignore gravity but copy every fall of the player's cube,
+        // so they hold still only while that cube is supported. A falling
+        // player's cube resting on a blue cube is blocked by it, so blue cubes
+        // count as stable when checking the player's cube itself.
+        let blue_cubes_stay = || {
+            self.cubes
+                .iter()
+                .position(|cube| cube.source == CubeSource::Player)
+                .is_none_or(|player_cube| {
+                    self.cube_stack_is_grounded(player_cube, ignored_cube, &|| true)
+                })
+        };
+        self.cube_stack_is_grounded(cube, ignored_cube, &blue_cubes_stay)
+    }
+
+    fn cube_stack_is_grounded(
+        &self,
+        mut cube: usize,
+        ignored_cube: Option<usize>,
+        blue_cubes_stay: &dyn Fn() -> bool,
+    ) -> bool {
         // Cubes remain solid collision bodies while falling, but they provide
         // ground support only when the whole vertical stack is stable. Follow
-        // the stack until it reaches terrain or a blue cube that blocks the
-        // bottom cube.
+        // the stack until it reaches terrain or a stationary blue cube. A blue
+        // cube falling with the player's cube is stable only if something
+        // below blocks it.
         // The bounded loop also handles a wrapped column of mutually supporting
         // cubes, which cannot move under the same gravity collision rules.
         for _ in 0..=self.cubes.len() {
+            if self.cubes[cube].source == CubeSource::Blue && blue_cubes_stay() {
+                return true;
+            }
+            let support = self.level.wrap(self.cubes[cube].position.offset(0, 1));
             if self.is_solid_tile_ignoring_plate_cube(support, ignored_cube)
                 || self.level.tile_at(support) == Tile::Skull
             {
                 return true;
             }
-            let Some(cube) = self.cubes.iter().find(|cube| cube.position == support) else {
+            let Some(below) = self.cubes.iter().position(|cube| cube.position == support) else {
                 return false;
             };
-            if cube.source == CubeSource::Blue {
-                return true;
-            }
-            support = self.level.wrap(cube.position.offset(0, 1));
+            cube = below;
         }
         true
     }
@@ -923,17 +942,11 @@ impl GameState {
                 if self.status == GameStatus::GameOver {
                     return;
                 }
-                // The projectile-collision preview must record every sweep, so
-                // only the real pass applies laser damage.
-                let real_pass = swept_cube_positions.is_none();
                 match body {
                     None if player_falls => {
                         let target = self.level.wrap(self.player.position.offset(0, 1));
                         if !blocks_fall(self, target, false) {
                             self.player.position = target;
-                            if real_pass {
-                                self.apply_laser_damage();
-                            }
                         }
                     }
                     Some(index) if self.cubes[index].source != CubeSource::Blue => {
@@ -959,9 +972,6 @@ impl GameState {
                             }
                             if target == self.player.position {
                                 self.status = GameStatus::GameOver;
-                            } else if real_pass {
-                                // A falling cube can uncover a beam aimed at the player.
-                                self.apply_laser_damage();
                             }
                         }
                     }
@@ -970,6 +980,13 @@ impl GameState {
             }
             if self.status == GameStatus::GameOver {
                 return;
+            }
+            // Bodies in a substep move together, so beams are checked only once
+            // every body has moved: a cube falling alongside the player keeps
+            // shielding it. The projectile-collision preview must record every
+            // sweep, so only the real pass applies laser damage.
+            if swept_cube_positions.is_none() {
+                self.apply_laser_damage();
             }
             // Red cubes react to plates between substeps, so the body indices
             // above stay valid while a substep runs.
@@ -1113,7 +1130,9 @@ impl GameState {
                 continue;
             };
             for moved_index in chain.into_iter().chain([index]) {
-                let target = self.level.wrap(self.cubes[moved_index].position.offset(dx, dy));
+                let target = self
+                    .level
+                    .wrap(self.cubes[moved_index].position.offset(dx, dy));
                 self.cubes[moved_index].position = target;
                 if let Some(swept) = swept.as_deref_mut() {
                     swept.push(target);

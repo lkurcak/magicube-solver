@@ -343,3 +343,22 @@ fn stacks_fall_through_gates_together_after_a_trigger_closes_them() {
 "#,
     );
 }
+
+#[test]
+fn a_cube_falling_alongside_the_player_shields_it_from_a_beam() {
+    let initial = game(
+        r#"
+######
+#  C@#
+#}   #
+#    #
+######
+        "#,
+    );
+
+    // Both bodies fall through the beam row together; the cube keeps shielding
+    // the player during the substep where the player crosses the beam.
+    let landed = initial.step(Wait);
+    assert_eq!(landed.status(), GameStatus::Playing);
+    assert_eq!(landed.player().position, Position { x: 4, y: 3 });
+}
