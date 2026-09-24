@@ -161,6 +161,8 @@ grounded-only rules, regardless of the manual-play toggles. During gameplay,
 The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
 `P` is a pressure-plate base, `G` is a goal pedestal, and `D` is a gate.
+`R` is a red pressure-plate base and `r` a red cube, drawn bright red while
+materialized and dark red while inactive.
 `{`, `^`, `}`, and `v` are laser emitters firing left, up, right, and down; `T`
 is a laser trigger. Beams are drawn as red `-`, `|`, or `+` (crossing), and a
 trigger turns white while a beam hits it.
@@ -451,6 +453,20 @@ after every single-tile gravity move of the player or a cube (so falling through
 a beam, or a cube falling away from a shielded player, is fatal), and at the end
 of the update. Projectiles ignore beams.
 
+`R` red pressure-plate bases are solid. Their plates are pressed like ordinary
+ones, by the player or any materialized cube, but they only control `r` red
+cubes: they never close gates, and laser triggers do not press them. While no
+red plate is pressed, every red cube is inactive where it is. It does not fall,
+block anything, press plates, stop beams or projectiles, or get pushed, and
+bodies and spawned cubes can share its tile. While any red plate is pressed, an
+inactive red cube materializes as soon as its tile holds no player, cube,
+projectile, or closed gate. A materialized red cube behaves exactly like a map
+cube until the last red plate is released, when it dematerializes in place,
+even in midair. Red cubes react after the player's action, between the two
+gravity substeps, and at the end of the update. Like gates, they ignore a
+freshly spawned cube on a red plate until the update's gravity pass finishes.
+A red cube starts materialized when a red plate is pressed in the initial map.
+
 `G` is a solid goal pedestal. At the end of an update, the player's `O` cube
 occupying the cell immediately above a pedestal wins, whether
 it arrived by spawning, pushing, or falling. A map cube or the player reaching
@@ -464,7 +480,7 @@ repeat: space above the top and beyond either horizontal edge is empty. Torches
 are decorative. Skulls are passable for players and projectiles but act as walls
 for cubes. `to_ascii()` renders only the original map rectangle, so use
 `player().position` to inspect a player outside it.
-Maps require exactly one `@` and can include map cubes (`C`), glass cubes (`g`), at most one existing
-player cube (`O`), gates (`D`), goal pedestals (`G`), pressure-plate bases
-(`P`), laser emitters (`{`, `^`, `}`, `v`), and laser triggers (`T`). Ragged
+Maps require exactly one `@` and can include map cubes (`C`), glass cubes (`g`),
+red cubes (`r`), at most one existing player cube (`O`), gates (`D`), goal
+pedestals (`G`), pressure-plate bases (`P`), red pressure-plate bases (`R`), laser emitters (`{`, `^`, `}`, `v`), and laser triggers (`T`). Ragged
 rows are padded with empty tiles, matching the screenshot importer's format.

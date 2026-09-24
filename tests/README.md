@@ -12,6 +12,9 @@ grounded-only defaults, and independent airborne-pushing opt-in during jumps.
 `lasers.rs` covers emitter and trigger parsing, beam blocking and crossing,
 player death by walking, jumping, or falling into beams and by losing a cube's
 shelter, and triggers acting as pressure plates.
+`red_cubes.rs` covers red plates and red cubes: intangible inactive cubes,
+materializing only into a free tile, dematerializing in place, pushing and plate
+pressing while active, and independence from gates and laser triggers.
 `goals.rs` covers passable positions above solid pedestals and winning with the
 player's cube.
 `solutions.rs` replays saved solutions for levels 1–7, solves each with the default

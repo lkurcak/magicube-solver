@@ -10,6 +10,15 @@ most three of the crop's 64 RGB pixels differ. Black background participates as
 a space template. Larger differences and equal-distance matches for different
 characters remain unresolved and are reported as `?`.
 
+An unpressed red pressure-plate base is pixel-identical to an ordinary one; only
+the red plate drawn in the empty cell above tells them apart. Templates of that
+cell use the atlas-only character `~`. After recognition, each `~` becomes empty
+space and turns the `P` below it into `R`; a `~` with no base below is reported
+as unrecognized. A pressed red base shows the red plate itself and maps to `R`
+directly. In manual labels, write `R` for the base and a space above it: an `R`
+label on a tile the atlas already knows as `P` is not learned, and a space label
+directly above an `R` is learned as `~`.
+
 Exactly one template must start with `anchor`. The importer searches for exact
 copies of that distinctive tile to find the grid alignment of every screenshot.
 

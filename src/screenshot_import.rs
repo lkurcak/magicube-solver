@@ -22,6 +22,10 @@ const HUD_PADDING_RIGHT: u32 = 3;
 const HUD_PADDING_BOTTOM: u32 = 1;
 /// What a HUD-covered cell is assumed to be when its visible pixels are inconclusive.
 const HIDDEN_SYMBOL: char = '#';
+/// Atlas-only symbol for the empty cell above an unpressed red pressure plate.
+/// Its red plate top is the only difference from an ordinary plate, whose base
+/// sprite is identical, so the marker turns the `P` below it into `R`.
+const RED_PLATE_MARKER: char = '~';
 
 #[derive(Debug)]
 pub struct Atlas {
@@ -147,7 +151,7 @@ impl Atlas {
                     )));
                 }
             };
-            if !is_label_symbol(symbol) || symbol == '?' {
+            if !(is_label_symbol(symbol) || symbol == RED_PLATE_MARKER) || symbol == '?' {
                 return Err(invalid_data(format!(
                     "{}:{}: unsupported tile symbol {symbol:?}",
                     manifest_path.display(),
@@ -397,6 +401,15 @@ impl Atlas {
                     TILE_SIZE,
                 )
                 .to_image();
+                // An unpressed red base looks like an ordinary base; the empty
+                // cell above it carries the red marker instead.
+                let symbol = match symbol {
+                    'R' if self.classify(&tile) == Ok(Some('P')) => continue,
+                    ' ' if rows.get(y + 1).and_then(|row| row.get(x)) == Some(&'R') => {
+                        RED_PLATE_MARKER
+                    }
+                    symbol => symbol,
+                };
                 if !self.templates.iter().any(|template| {
                     template.image.as_raw() == tile.as_raw() && template.symbol == symbol
                 }) {
@@ -480,6 +493,9 @@ pub fn import_level_with_labels(
         }
         rows.push(row);
     }
+    resolve_red_plate_markers(&mut rows, &mut unknown, |grid_x, grid_y| {
+        imageops::crop_imm(image, xs[grid_x], ys[grid_y], TILE_SIZE, TILE_SIZE).to_image()
+    });
 
     let trimmed = trim_void(rows)?;
     for tile in unknown.values_mut() {
@@ -502,6 +518,41 @@ pub fn import_level_with_labels(
         height: trimmed.height,
         unknown_tiles: unknown.into_values().collect(),
     })
+}
+
+/// Each red-plate marker becomes empty space and marks the base below it red.
+/// A marker without a base below is reported as unrecognized.
+fn resolve_red_plate_markers(
+    rows: &mut [Vec<char>],
+    unknown: &mut BTreeMap<u64, UnknownTile>,
+    crop: impl Fn(usize, usize) -> RgbaImage,
+) {
+    for y in 0..rows.len() {
+        for x in 0..rows[y].len() {
+            if rows[y][x] != RED_PLATE_MARKER {
+                continue;
+            }
+            let below = rows.get_mut(y + 1).and_then(|row| row.get_mut(x));
+            if let Some(base @ ('P' | 'R')) = below {
+                *base = 'R';
+                rows[y][x] = ' ';
+                continue;
+            }
+            rows[y][x] = '?';
+            let tile = crop(x, y);
+            let hash = tile_hash(&tile);
+            unknown
+                .entry(hash)
+                .or_insert_with(|| UnknownTile {
+                    hash,
+                    image: tile,
+                    positions: Vec::new(),
+                    reason: "red pressure-plate top without a pressure-plate base below".to_owned(),
+                })
+                .positions
+                .push((x, y));
+        }
+    }
 }
 
 /// Labels take precedence over guesses. Cells the visible pixels cannot decide
@@ -736,12 +787,14 @@ fn is_label_symbol(symbol: char) -> bool {
         ' ' | '#'
             | 'D'
             | 'P'
+            | 'R'
             | 'G'
             | 'S'
             | 't'
             | '?'
             | 'C'
             | 'g'
+            | 'r'
             | 'O'
             | '@'
             | '{'
@@ -1040,6 +1093,65 @@ mod tests {
                 .reason
                 .contains("label at (0, 0) is '#'")
         );
+    }
+
+    /// Walls, an ordinary plate base, and a red plate top, laid out as rows.
+    fn red_plate_screenshot(rows: &[&[u8]]) -> RgbaImage {
+        let mut screenshot = RgbaImage::new(8 * rows[0].len() as u32, 8 * rows.len() as u32);
+        for (y, row) in rows.iter().enumerate() {
+            for (x, &seed) in row.iter().enumerate() {
+                if seed != 0 {
+                    imageops::replace(
+                        &mut screenshot,
+                        &test_tile(seed),
+                        x as i64 * 8,
+                        y as i64 * 8,
+                    );
+                }
+            }
+        }
+        screenshot
+    }
+
+    fn red_plate_atlas() -> Atlas {
+        let mut atlas = test_atlas();
+        for (symbol, seed) in [('P', 4), (RED_PLATE_MARKER, 5)] {
+            atlas.templates.push(Template {
+                symbol,
+                name: format!("{symbol}.png"),
+                image: test_tile(seed),
+            });
+        }
+        atlas
+    }
+
+    #[test]
+    fn red_plate_tops_turn_the_base_below_red() {
+        let screenshot = red_plate_screenshot(&[&[1, 5, 1, 5], &[1, 4, 1, 1]]);
+        let imported = import_level(&screenshot, &red_plate_atlas()).unwrap();
+        assert_eq!(imported.map, "# #?\n#R##");
+        assert_eq!(imported.unknown_tiles.len(), 1);
+        assert_eq!(imported.unknown_tiles[0].positions, [(3, 0)]);
+        assert!(
+            imported.unknown_tiles[0]
+                .reason
+                .contains("without a pressure-plate base below")
+        );
+    }
+
+    #[test]
+    fn red_plate_labels_teach_the_top_and_keep_the_shared_base_ordinary() {
+        let mut atlas = red_plate_atlas();
+        atlas.templates.pop();
+        let screenshot = red_plate_screenshot(&[&[1, 5, 1], &[1, 4, 1]]);
+        let summary = atlas
+            .learn_labeled_level_from(&screenshot, "# #\n#R#", "red.txt")
+            .unwrap();
+        assert_eq!(summary.learned_variants, 1);
+        assert_eq!(import_level(&screenshot, &atlas).unwrap().map, "# #\n#R#");
+
+        let ordinary = red_plate_screenshot(&[&[1, 0, 1], &[1, 4, 1]]);
+        assert_eq!(import_level(&ordinary, &atlas).unwrap().map, "# #\n#P#");
     }
 
     #[test]

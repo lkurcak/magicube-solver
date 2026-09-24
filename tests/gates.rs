@@ -269,3 +269,23 @@ fn gate_goals_follow_gate_collision_rules() {
             .any(|cube| cube.position == Position { x: 2, y: 1 })
     );
 }
+
+#[test]
+fn cube_entering_a_beam_opens_laser_gates_only_from_the_next_gravity_substep() {
+    let initial = game(
+        r#"
+ @   C
+#D#T g{
+#  # O
+#### #
+        "#,
+    );
+    assert!(initial.pressure_plates_active());
+
+    // Removing the player's cube drops the map cube into the beam. The player
+    // on the gate falls only once the next substep samples the dark trigger.
+    let fired = initial.step(GameInput::Shoot).step(GameInput::Left);
+
+    assert_eq!(fired.player().position, Position { x: 1, y: 1 });
+    assert!(!fired.pressure_plates_active());
+}

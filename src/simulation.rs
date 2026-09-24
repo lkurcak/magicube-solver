@@ -92,6 +92,8 @@ pub enum CubeSource {
     Player,
     /// A map cube that projectiles pass through.
     Glass,
+    /// A materialized red cube, present while a red pressure plate is pressed.
+    Red,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -142,6 +144,8 @@ pub enum Tile {
     Wall,
     Gate,
     PressurePlateBase,
+    /// A pressure-plate base that materializes red cubes instead of closing gates.
+    RedPressurePlateBase,
     Pedestal,
     Skull,
     Torch,
@@ -164,6 +168,7 @@ impl Tile {
             Self::Wall => '#',
             Self::Gate => 'D',
             Self::PressurePlateBase => 'P',
+            Self::RedPressurePlateBase => 'R',
             Self::Pedestal => 'G',
             Self::Skull => 'S',
             Self::Torch => 't',
@@ -225,6 +230,11 @@ impl Level {
         self.tile_at(position.offset(0, 1)) == Tile::PressurePlateBase
     }
 
+    /// Whether this occupiable position is immediately above a red pressure-plate base.
+    pub fn is_red_pressure_plate(&self, position: Position) -> bool {
+        self.tile_at(position.offset(0, 1)) == Tile::RedPressurePlateBase
+    }
+
     pub(crate) fn has_goal(&self) -> bool {
         self.tiles.contains(&Tile::Pedestal)
     }
@@ -261,6 +271,9 @@ pub struct GameState {
     settings: GameSettings,
     player: PlayerState,
     cubes: Vec<Cube>,
+    /// Dematerialized red cubes. They take no part in physics, and become
+    /// [`CubeSource::Red`] entries of `cubes` once they can materialize.
+    inactive_red_cubes: Vec<Position>,
     projectile: Option<Projectile>,
     status: GameStatus,
 }
@@ -276,7 +289,8 @@ impl GameState {
     /// player and projectiles, but block cubes. Unknown tiles stop projectiles but
     /// do not block player movement or supply ground support. `{`, `^`, `}`, and
     /// `v` are solid laser emitters firing left, up, right, and down; `T` is a
-    /// solid laser trigger.
+    /// solid laser trigger. `r` is a red cube and `R` a solid red pressure-plate
+    /// base; red cubes start materialized if a red plate is already pressed.
     pub fn from_ascii(map: &str) -> Result<Self, ParseLevelError> {
         Self::from_ascii_with_settings(map, GameSettings::default())
     }
@@ -305,6 +319,7 @@ impl GameState {
         };
         let mut player_position = None;
         let mut cubes: Vec<Cube> = Vec::new();
+        let mut inactive_red_cubes = Vec::new();
         for (y, line) in lines.iter().enumerate() {
             for (x, symbol) in line.chars().enumerate() {
                 let position = Position {
@@ -316,6 +331,7 @@ impl GameState {
                     '#' => Tile::Wall,
                     'D' => Tile::Gate,
                     'P' => Tile::PressurePlateBase,
+                    'R' => Tile::RedPressurePlateBase,
                     'G' => Tile::Pedestal,
                     'S' => Tile::Skull,
                     't' => Tile::Torch,
@@ -339,6 +355,10 @@ impl GameState {
                         cubes.push(Cube { position, source });
                         Tile::Empty
                     }
+                    'r' => {
+                        inactive_red_cubes.push(position);
+                        Tile::Empty
+                    }
                     '@' => {
                         if player_position.replace(position).is_some() {
                             return Err(ParseLevelError::MultiplePlayers);
@@ -353,7 +373,7 @@ impl GameState {
             }
         }
 
-        Ok(Self {
+        let mut state = Self {
             level: Arc::new(level),
             settings,
             player: PlayerState {
@@ -362,9 +382,12 @@ impl GameState {
                 mode: PlayerMode::Normal,
             },
             cubes,
+            inactive_red_cubes,
             projectile: None,
             status: GameStatus::Playing,
-        })
+        };
+        state.update_red_cubes(None);
+        Ok(state)
     }
 
     pub fn level(&self) -> &Level {
@@ -381,6 +404,11 @@ impl GameState {
 
     pub fn cubes(&self) -> &[Cube] {
         &self.cubes
+    }
+
+    /// Positions of red cubes that are currently dematerialized.
+    pub fn inactive_red_cubes(&self) -> &[Position] {
+        &self.inactive_red_cubes
     }
 
     pub fn projectile(&self) -> Option<Projectile> {
@@ -414,6 +442,56 @@ impl GameState {
             || self.cubes.iter().enumerate().any(|(index, cube)| {
                 Some(index) != ignored_cube && self.level.is_pressure_plate(cube.position)
             })
+    }
+
+    /// A red pressure plate is pressed while the position above its base is
+    /// occupied by the player or any materialized cube. Red plates only control
+    /// red cubes; they do not close gates, and laser triggers do not press them.
+    pub fn red_pressure_plates_active(&self) -> bool {
+        self.red_pressure_plates_pressed_ignoring_cube(None)
+    }
+
+    fn red_pressure_plates_pressed_ignoring_cube(&self, ignored_cube: Option<usize>) -> bool {
+        self.level.is_red_pressure_plate(self.player.position)
+            || self.cubes.iter().enumerate().any(|(index, cube)| {
+                Some(index) != ignored_cube && self.level.is_red_pressure_plate(cube.position)
+            })
+    }
+
+    /// Releasing every red plate dematerializes all red cubes where they are.
+    /// While a plate is pressed, each inactive red cube materializes as soon as
+    /// its tile is free of bodies, the projectile, and solid terrain. Returns
+    /// the index of `ignored_cube` after the cube list changes.
+    fn update_red_cubes(&mut self, ignored_cube: Option<usize>) -> Option<usize> {
+        if !self.red_pressure_plates_pressed_ignoring_cube(ignored_cube) {
+            let ignored = ignored_cube.map(|index| self.cubes[index]);
+            let (red, others): (Vec<_>, Vec<_>) = std::mem::take(&mut self.cubes)
+                .into_iter()
+                .partition(|cube| cube.source == CubeSource::Red);
+            self.inactive_red_cubes
+                .extend(red.into_iter().map(|cube| cube.position));
+            self.cubes = others;
+            return ignored.and_then(|ignored| self.cubes.iter().position(|&cube| cube == ignored));
+        }
+        let mut index = 0;
+        while index < self.inactive_red_cubes.len() {
+            let position = self.inactive_red_cubes[index];
+            if self.body_occupies(position)
+                || self.is_solid_tile(position)
+                || self
+                    .projectile
+                    .is_some_and(|projectile| projectile.position == position)
+            {
+                index += 1;
+            } else {
+                self.inactive_red_cubes.remove(index);
+                self.cubes.push(Cube {
+                    position,
+                    source: CubeSource::Red,
+                });
+            }
+        }
+        ignored_cube
     }
 
     /// Whether a laser beam stops at `position`. Beams pass through empty
@@ -523,6 +601,7 @@ impl GameState {
             tile,
             Tile::Wall
                 | Tile::PressurePlateBase
+                | Tile::RedPressurePlateBase
                 | Tile::Pedestal
                 | Tile::LaserEmitter(_)
                 | Tile::LaserTrigger
@@ -654,8 +733,9 @@ impl GameState {
                 GameInput::Jump | GameInput::Shoot | GameInput::Wait => {}
             }
         }
-        // Walking, jumping, pushing, or removing the old player cube can expose
-        // the player to a beam.
+        // Walking, jumping, pushing, or removing the old player cube can press
+        // or release red plates, and expose the player to a beam.
+        next.update_red_cubes(None);
         next.apply_laser_damage();
 
         let swept_cube_positions = next.gravity_swept_cube_positions();
@@ -674,6 +754,8 @@ impl GameState {
             !jumped && next.player.air_inputs_remaining == 0,
             spawned_cube,
         );
+        // The spawned cube presses red plates from here on.
+        next.update_red_cubes(None);
         next.apply_laser_damage();
         if next.is_grounded() {
             next.player.air_inputs_remaining = 0;
@@ -780,7 +862,7 @@ impl GameState {
         &mut self,
         player_falls: bool,
         mut swept_cube_positions: Option<&mut Vec<Position>>,
-        ignored_plate_cube: Option<usize>,
+        mut ignored_plate_cube: Option<usize>,
     ) {
         for _ in 0..2 {
             // None identifies the player; Some(index) identifies a cube.
@@ -804,9 +886,18 @@ impl GameState {
                 })
                 .filter(|&position| self.level.tile_at(position).is_gate())
                 .collect();
+            // Laser triggers are sampled once per substep. A body falling
+            // through a beam cannot open gates for bodies moving in the same
+            // substep; plate contact still takes effect immediately.
+            let lasers_lit = self.laser_triggers_lit();
             let blocks_fall = |state: &Self, target: Position, cube: bool| {
-                (!held_open_gates.contains(&target)
-                    && state.is_solid_tile_ignoring_plate_cube(target, ignored_plate_cube))
+                let solid_tile = if state.level.tile_at(target).is_gate() {
+                    (lasers_lit || state.pressure_plates_pressed_ignoring_cube(ignored_plate_cube))
+                        && !state.body_occupies(target)
+                } else {
+                    state.is_solid_tile(target)
+                };
+                (!held_open_gates.contains(&target) && solid_tile)
                     || state.cubes.iter().any(|other| other.position == target)
                     || (cube && state.level.tile_at(target) == Tile::Skull)
             };
@@ -850,6 +941,15 @@ impl GameState {
                     None => {}
                 }
             }
+            if self.status == GameStatus::GameOver {
+                return;
+            }
+            // Red cubes react to plates between substeps, so the body indices
+            // above stay valid while a substep runs.
+            ignored_plate_cube = self.update_red_cubes(ignored_plate_cube);
+            if swept_cube_positions.is_none() {
+                self.apply_laser_damage();
+            }
         }
     }
 
@@ -885,12 +985,15 @@ impl GameState {
                 CubeSource::Map => 'C',
                 CubeSource::Player => 'O',
                 CubeSource::Glass => 'g',
+                CubeSource::Red => 'r',
             }
         } else if let Some(projectile) = self.projectile.filter(|p| p.position == position) {
             match projectile.direction {
                 Direction::Left => '<',
                 Direction::Right => '>',
             }
+        } else if self.inactive_red_cubes.contains(&position) {
+            'r'
         } else {
             self.level.tile_at(position).symbol()
         }
