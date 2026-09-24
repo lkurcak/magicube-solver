@@ -198,8 +198,11 @@ fn custom_level_1_is_solved_through_side_and_bottom_wrapping() {
     // Fall through the floor gap and land in the top-left room.
     let state = step(state, &[Right, Right, Left]);
     assert_eq!(state.player().position, Position { x: 2, y: 1 });
-    // Walk off the left edge and drop into the room right of the goal.
+    // Walk off the left edge and drop into the room right of the goal. Walking
+    // off an edge drops only one tile, so wait to land before shooting.
     let state = step(state, &[Left; 7]);
+    assert_eq!(state.player().position, Position { x: 6, y: 2 });
+    let state = step(state, &[Wait]);
     assert_eq!(state.player().position, Position { x: 6, y: 3 });
     // The shot wraps around the right edge and stops against the goal's wall.
     let state = step(state, &[Shoot, Right, Wait, Left]);
@@ -209,7 +212,7 @@ fn custom_level_1_is_solved_through_side_and_bottom_wrapping() {
     let SolveOutcome::Solved(inputs) = result.outcome else {
         panic!("expected a solution, got {result:?}");
     };
-    assert_eq!(inputs.len(), 20);
+    assert_eq!(inputs.len(), 21);
 }
 
 #[test]

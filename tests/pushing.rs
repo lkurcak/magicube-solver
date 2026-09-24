@@ -1,7 +1,7 @@
 mod support;
 
 use magicube_solver::GameInput::{Jump, Left, Right, Wait};
-use magicube_solver::{GameSettings, GameState};
+use magicube_solver::{GameSettings, GameState, Position};
 use support::{assert_level_eq, level};
 
 fn game(drawing: &str) -> GameState {
@@ -97,9 +97,20 @@ fn cube_pushed_off_a_ledge_falls_in_the_same_update() {
 #######
 "#,
     );
+    // A pushed cube falls only one tile in the update it is pushed.
     let pushed = initial.step(Right);
     assert_level_eq(
         &pushed.to_ascii(),
+        r#"
+#######
+# @C  #
+####O #
+#     #
+#######
+"#,
+    );
+    assert_level_eq(
+        &pushed.step(Wait).to_ascii(),
         r#"
 #######
 # @C  #
@@ -242,4 +253,26 @@ fn airborne_setting_does_not_allow_pushing_chains_through_walls() {
             assert_eq!(after.position.x, before.position.x);
         }
     }
+}
+
+#[test]
+fn player_and_cube_pushed_off_a_ledge_fall_together() {
+    let initial = game(
+        r#"
+#####
+#@C #
+##S #
+#   #
+#   #
+#####
+"#,
+    );
+    // Both lose support at once, so each falls one tile in the push update and
+    // two tiles in the next, staying side by side.
+    let pushed = initial.step(Right);
+    assert_eq!(pushed.player().position, Position { x: 2, y: 2 });
+    assert_eq!(pushed.cubes()[0].position, Position { x: 3, y: 2 });
+    let landed = pushed.step(Wait);
+    assert_eq!(landed.player().position, Position { x: 2, y: 4 });
+    assert_eq!(landed.cubes()[0].position, Position { x: 3, y: 4 });
 }

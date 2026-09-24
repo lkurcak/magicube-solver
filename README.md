@@ -395,7 +395,8 @@ Movement updates work as follows:
   blocked moves and ignored airborne jump attempts also consume time.
 - Gravity resumes after movement on the second air input. Without airtime, every
   update applies gravity after movement: descend at most two tiles, checking for
-  solid obstacle before each tile. Landing ends any remaining airtime.
+  solid obstacle before each tile. Walking off an edge descends only one tile in
+  that update, and so do cubes pushed off an edge. Landing ends any remaining airtime.
 - `Wait` advances time without horizontal movement.
 
 `P` pressure-plate bases are solid. While the player or any cube occupies the
@@ -471,7 +472,10 @@ cube until the last red plate is released, when it dematerializes in place,
 even in midair. Red cubes react after the player's action, between the two
 gravity substeps, and at the end of the update. Like gates, they ignore a
 freshly spawned cube on a red plate until the update's gravity pass finishes.
-A red cube starts materialized when a red plate is pressed in the initial map.
+A body moving sideways presses its destination at once but frees its old tile
+only when the move ends, so a red cube materializing in a tile that the
+update's walk or push just left falls only one tile in that update, like the
+moving bodies themselves. A red cube starts materialized when a red plate is pressed in the initial map.
 
 `b` blue cubes never fall and cannot be pushed directly: a pushed chain that
 reaches one before reaching the player's cube is blocked. A chain that reaches

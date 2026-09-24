@@ -126,16 +126,16 @@ fn blue_cubes_copy_every_tile_the_player_cube_falls() {
         "#,
     );
 
-    // The pushed cube falls two tiles in the same update, and the blue cube
-    // copies the push and both falls.
+    // The pushed cube falls only one tile in the update it is pushed, and the
+    // blue cube copies the push and the fall.
     let pushed = initial.step(Right);
     assert_level_eq(
         &pushed.to_ascii(),
         r#"
 #######
 # @   #
-### # #
-#  O b#
+###O#b#
+#     #
 #     #
 #######
 "#,
@@ -189,15 +189,15 @@ fn blue_cubes_do_not_move_into_the_player() {
         "#,
     );
 
-    // The blue cube copies the push, but the player blocks both falls.
+    // The blue cube copies the push, but the player blocks its fall.
     assert_level_eq(
         &initial.step(Right).to_ascii(),
         r#"
 ########
 # b    #
 # @    #
-### ####
-#  O   #
+###O####
+#      #
 ########
 "#,
     );

@@ -154,7 +154,7 @@ fn landing_on_a_ledge_ends_airtime_and_allows_another_jump() {
 }
 
 #[test]
-fn walking_off_either_side_of_a_ledge_falls_two_tiles_immediately() {
+fn walking_off_either_side_of_a_ledge_falls_one_tile_then_two() {
     let initial = game(
         r#"
 #######
@@ -167,7 +167,7 @@ fn walking_off_either_side_of_a_ledge_falls_two_tiles_immediately() {
     );
     for (input, x) in [(Left, 2), (Right, 4)] {
         let falling = initial.step(input);
-        assert_eq!(falling.player().position, Position { x, y: 3 });
+        assert_eq!(falling.player().position, Position { x, y: 2 });
         assert!(!falling.is_grounded());
         let landed = falling.step(Wait);
         assert_eq!(landed.player().position, Position { x, y: 4 });
@@ -268,8 +268,11 @@ fn blocked_jump_does_not_grant_airtime() {
     );
     let blocked = initial.step(Jump);
     assert_eq!(blocked, initial);
+    // Walking off an edge drops one tile, then gravity resumes immediately.
+    let walked_off = blocked.step(Right);
+    assert_eq!(walked_off.player().position, Position { x: 3, y: 3 });
     assert_eq!(
-        blocked.step(Right).player().position,
+        walked_off.step(Wait).player().position,
         Position { x: 3, y: 4 }
     );
 }

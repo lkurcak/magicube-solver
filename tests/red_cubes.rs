@@ -196,3 +196,44 @@ fn projectiles_pass_through_inactive_red_cubes() {
     );
     assert_eq!(fired.inactive_red_cubes(), [Position { x: 3, y: 0 }]);
 }
+
+#[test]
+fn red_cube_appearing_in_a_tile_left_this_update_falls_one_tile() {
+    // The first push presses the plate while the blue cube copies the push onto
+    // the red cube's tile. The second push keeps the plate pressed (the player
+    // replaces their cube on it) and moves the blue cube off, but the red cube
+    // can appear only once that move ends, so it falls one tile, not two.
+    let initial = game(
+        r#"
+############
+#br  @O    #
+## ####R####
+#          #
+#          #
+############
+        "#,
+    );
+    let blocked = initial.step(GameInput::Right);
+    assert!(blocked.red_pressure_plates_active());
+    assert_eq!(blocked.inactive_red_cubes(), [Position { x: 2, y: 1 }]);
+
+    let spawned = blocked.step(GameInput::Right);
+    assert!(spawned.cubes().contains(&red(2, 2)));
+    assert!(spawned.step(GameInput::Wait).cubes().contains(&red(2, 4)));
+}
+
+#[test]
+fn red_cube_appearing_when_its_plate_is_pressed_falls_two_tiles() {
+    let initial = game(
+        r#"
+############
+# r   @O   #
+## ####R####
+#          #
+#          #
+############
+        "#,
+    );
+    let spawned = initial.step(GameInput::Right);
+    assert!(spawned.cubes().contains(&red(2, 3)));
+}

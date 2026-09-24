@@ -588,6 +588,10 @@ impl GameState {
         }
     }
 
+    fn body_positions(&self) -> impl Iterator<Item = Position> + '_ {
+        std::iter::once(self.player.position).chain(self.cubes.iter().map(|cube| cube.position))
+    }
+
     fn body_occupies(&self, position: Position) -> bool {
         self.player.position == position || self.cubes.iter().any(|cube| cube.position == position)
     }
@@ -715,7 +719,8 @@ impl GameState {
     ///
     /// An update resolves the action, moves the projectile by up to the configured
     /// number of tiles, then
-    /// applies up to two gravity substeps to player and cubes. Within each gravity
+    /// applies up to two gravity substeps to player and cubes. A player walking
+    /// off an edge falls only during the first substep of that update. Within each gravity
     /// substep, lower bodies move first so stacks and falling supports stay intact.
     /// A jump rises one tile and suspends player gravity for two more air inputs;
     /// gravity resumes at the end of the second one. Cubes have no airtime.
@@ -728,6 +733,11 @@ impl GameState {
             return next;
         }
         let mut jumped = false;
+        let mut walked_off_edge = false;
+        // Bodies that moved sideways, and red cubes that appear in tiles they
+        // left, fall only one tile this update.
+        let mut late_cubes = Vec::new();
+        let mut vacated = Vec::new();
         if next.player.mode == PlayerMode::Recovering {
             next.player.mode = PlayerMode::Normal;
         } else if input == GameInput::Shoot {
@@ -751,11 +761,22 @@ impl GameState {
             next.player.mode = PlayerMode::Recovering;
         } else {
             match input {
-                GameInput::Left => {
-                    next.try_walk(Direction::Left);
-                }
-                GameInput::Right => {
-                    next.try_walk(Direction::Right);
+                GameInput::Left | GameInput::Right => {
+                    let direction = if input == GameInput::Left {
+                        Direction::Left
+                    } else {
+                        Direction::Right
+                    };
+                    let was_grounded = next.is_grounded();
+                    let occupied: Vec<_> = next.body_positions().collect();
+                    if let Some(pushed) = next.try_walk(direction) {
+                        walked_off_edge = was_grounded && !next.is_grounded();
+                        late_cubes = pushed;
+                        vacated = occupied
+                            .into_iter()
+                            .filter(|&position| !next.body_occupies(position))
+                            .collect();
+                    }
                 }
                 GameInput::Jump if next.is_grounded() && next.try_move(0, -1) => {
                     next.player.air_inputs_remaining = 2;
@@ -765,11 +786,19 @@ impl GameState {
             }
         }
         // Walking, jumping, pushing, or removing the old player cube can press
-        // or release red plates, and expose the player to a beam.
+        // or release red plates, and expose the player to a beam. A moving body
+        // presses its destination at once but frees its old tile only once the
+        // move ends, so a red cube appearing there falls only one tile.
         next.update_red_cubes(None);
         next.apply_laser_damage();
+        late_cubes.extend(
+            next.cubes
+                .iter()
+                .map(|cube| cube.position)
+                .filter(|position| vacated.contains(position)),
+        );
 
-        let swept_cube_positions = next.gravity_swept_cube_positions();
+        let swept_cube_positions = next.gravity_swept_cube_positions(&late_cubes);
         let spawned_cube = next.advance_projectile(&swept_cube_positions);
         // A cube created by this projectile becomes a plate activator only after
         // the gravity response to removing the previous player cube has finished.
@@ -781,10 +810,17 @@ impl GameState {
                     next.player.air_inputs_remaining.saturating_sub(1);
             }
         }
-        next.apply_gravity_ignoring_plate_cube(
-            !jumped && next.player.air_inputs_remaining == 0,
-            spawned_cube,
-        );
+        // Walking off an edge drops the player only one tile in that update,
+        // just like the cubes it pushed.
+        let player_fall_substeps = match (
+            jumped || next.player.air_inputs_remaining > 0,
+            walked_off_edge,
+        ) {
+            (true, _) => 0,
+            (false, true) => 1,
+            (false, false) => 2,
+        };
+        next.apply_gravity_ignoring_plate_cube(player_fall_substeps, late_cubes, spawned_cube);
         // The spawned cube presses red plates from here on.
         next.update_red_cubes(None);
         next.apply_laser_damage();
@@ -872,7 +908,7 @@ impl GameState {
     /// This preview does not mutate the real state. It lets projectile collision
     /// treat a falling cube as occupying its complete vertical sweep while all
     /// other physics continues to use the cube's canonical position.
-    fn gravity_swept_cube_positions(&self) -> Vec<Position> {
+    fn gravity_swept_cube_positions(&self, late_cubes: &[Position]) -> Vec<Position> {
         if self.projectile.is_none() || self.cubes.is_empty() {
             return Vec::new();
         }
@@ -883,25 +919,30 @@ impl GameState {
             .filter(|cube| cube.source != CubeSource::Glass)
             .map(|cube| cube.position)
             .collect();
-        preview.apply_gravity_recording(false, Some(&mut swept), None);
+        preview.apply_gravity_recording(0, late_cubes.to_vec(), Some(&mut swept), None);
         swept
     }
 
     fn apply_gravity_ignoring_plate_cube(
         &mut self,
-        player_falls: bool,
+        player_fall_substeps: usize,
+        late_cubes: Vec<Position>,
         ignored_cube: Option<usize>,
     ) {
-        self.apply_gravity_recording(player_falls, None, ignored_cube);
+        self.apply_gravity_recording(player_fall_substeps, late_cubes, None, ignored_cube);
     }
 
+    /// Cubes at `late_cubes` moved sideways or appeared late this update, so
+    /// like a player walking off an edge they fall during the first substep only.
     fn apply_gravity_recording(
         &mut self,
-        player_falls: bool,
+        player_fall_substeps: usize,
+        mut late_cubes: Vec<Position>,
         mut swept_cube_positions: Option<&mut Vec<Position>>,
         mut ignored_plate_cube: Option<usize>,
     ) {
-        for _ in 0..2 {
+        for substep in 0..2 {
+            let player_falls = substep < player_fall_substeps;
             // None identifies the player; Some(index) identifies a cube.
             let mut bodies: Vec<_> = self
                 .cubes
@@ -950,11 +991,21 @@ impl GameState {
                         }
                     }
                     Some(index) if self.cubes[index].source != CubeSource::Blue => {
-                        let target = self.level.wrap(self.cubes[index].position.offset(0, 1));
+                        let position = self.cubes[index].position;
+                        // Positions identify late cubes because red cubes
+                        // may reindex the cube list between substeps.
+                        let late = late_cubes.iter().position(|&late| late == position);
+                        if substep > 0 && late.is_some() {
+                            continue;
+                        }
+                        let target = self.level.wrap(position.offset(0, 1));
                         let gates_closed = lasers_lit
                             || self.pressure_plates_pressed_ignoring_cube(ignored_plate_cube);
                         if !blocks_fall(self, target, true) {
                             self.cubes[index].position = target;
+                            if let Some(late) = late {
+                                late_cubes[late] = target;
+                            }
                             if let Some(swept) = swept_cube_positions
                                 .as_deref_mut()
                                 .filter(|_| self.cubes[index].source != CubeSource::Glass)
@@ -1044,7 +1095,8 @@ impl GameState {
         }
     }
 
-    fn try_walk(&mut self, direction: Direction) -> bool {
+    /// Returns the positions of the pushed cubes after a successful walk.
+    fn try_walk(&mut self, direction: Direction) -> Option<Vec<Position>> {
         let dx = direction.dx();
         let destination = self.level.wrap(self.player.position.offset(dx, 0));
         let mut target = destination;
@@ -1053,7 +1105,7 @@ impl GameState {
         // jumping and gravity still use ordinary solid-tile collision checks.
         loop {
             if self.is_solid_tile(target) {
-                return false;
+                return None;
             }
             match self.cubes.iter().position(|cube| cube.position == target) {
                 // A blue cube ahead of the player's cube moves the same way
@@ -1063,7 +1115,7 @@ impl GameState {
                         .iter()
                         .any(|&index: &usize| self.cubes[index].source == CubeSource::Player)
                     {
-                        return false;
+                        return None;
                     }
                     chain.push(index);
                     target = self.level.wrap(target.offset(dx, 0));
@@ -1072,14 +1124,14 @@ impl GameState {
                     if !self.cube_is_grounded_ignoring_plate_cube(index, None)
                         || (!self.settings.allow_airborne_pushing && !self.is_grounded())
                     {
-                        return false;
+                        return None;
                     }
                     chain.push(index);
                     target = self.level.wrap(target.offset(dx, 0));
                 }
                 None => {
                     if !chain.is_empty() && self.level.tile_at(target) == Tile::Skull {
-                        return false;
+                        return None;
                     }
                     break;
                 }
@@ -1096,7 +1148,12 @@ impl GameState {
         if pushed_player_cube {
             self.move_blue_cubes(dx, 0, &chain, gates_closed, None);
         }
-        true
+        Some(
+            chain
+                .iter()
+                .map(|&index| self.cubes[index].position)
+                .collect(),
+        )
     }
 
     /// Moves every blue cube one tile along with the player's cube. Blue cubes
