@@ -308,10 +308,25 @@ fn state_caps_include_the_start_and_the_winning_state() {
 }
 
 #[test]
-fn open_maps_reach_the_limit_instead_of_claiming_unsolvability() {
+fn walking_off_the_map_wraps_so_open_maps_are_exhausted() {
     let initial = game(
         r#"
 @ G
+"#,
+    );
+    let result = solve(&initial, SolveOptions { max_states: None });
+    assert_eq!(result.outcome, SolveOutcome::Unsolvable);
+    assert_eq!(result.stats.discovered_states, 2);
+}
+
+#[test]
+fn large_maps_reach_the_limit_instead_of_claiming_unsolvability() {
+    let initial = game(
+        r#"
+@ C C C
+
+########
+
 "#,
     );
     let result = solve(
@@ -325,10 +340,13 @@ fn open_maps_reach_the_limit_instead_of_claiming_unsolvability() {
 }
 
 #[test]
-fn unlimited_searches_on_open_maps_can_be_cancelled() {
+fn unlimited_searches_on_large_maps_can_be_cancelled() {
     let initial = game(
         r#"
-@ G
+@ C C C
+
+########
+
 "#,
     );
     let mut reports = Vec::new();
@@ -345,16 +363,16 @@ fn unlimited_searches_on_open_maps_can_be_cancelled() {
 }
 
 #[test]
-fn can_solve_from_above_the_map_without_clipping_coordinates() {
+fn can_solve_by_jumping_through_the_top_edge() {
+    // The only way out of the top-left pocket is up through the top edge,
+    // which wraps to the bottom row next to the cube.
     let initial = game(
         r#"
-@O
-##G
+@#G#
+####
+ O  
 "#,
-    )
-    .step(Jump);
-    assert_eq!(initial.player().position.y, -1);
+    );
     let inputs = solution(&initial);
-    assert_eq!(inputs.len(), 3);
-    assert!(!can_win_within(&initial, 2));
+    assert_eq!(inputs.first(), Some(&Jump));
 }

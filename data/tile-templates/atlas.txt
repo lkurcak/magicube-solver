@@ -13,9 +13,11 @@ t ../tiles-manual/torch.png
 t ../tiles-manual/torch2.png
 t ../tiles-manual/torch3.png
 t ../tiles-manual/torch4.png
+t ../tiles-manual/torch5.png
 C ../tiles-manual/cube.png
 C ../tiles-manual/cube2.png
 C ../tiles-manual/cube3.png
+C ../tiles-manual/cube4.png
 g ../tiles-manual/glass.png
 g ../tiles-manual/glass2.png
 g ../tiles-manual/glass3.png
@@ -25,12 +27,15 @@ D ../tiles-manual/gate3.png
 D ../tiles-manual/gate-closed.png
 D ../tiles-manual/gate-and-goal.png
 D ../tiles-manual/gate-and-goal2.png
+D ../tiles-manual/gate-and-goal3.png
 _ ../tiles-manual/pressure-plate.png
 P ../tiles-manual/pressure-plate-base.png
 P ../tiles-manual/pressure-plate-base-pressed.png
 ~ ../tiles-manual/pressure-plate-red.png
 ~ ../tiles-manual/pressure-plate-red2.png
 R ../tiles-manual/pressure-plate-red-base-pressed.png
+b ../tiles-manual/blue.png
+b ../tiles-manual/blue2.png
 r ../tiles-manual/red.png
 r ../tiles-manual/red-inactive.png
 r ../tiles-manual/red-inactive2.png
@@ -38,6 +43,7 @@ r ../tiles-manual/red-inactive3.png
 r ../tiles-manual/red-inactive4.png
 r ../tiles-manual/red-inactive5.png
 r ../tiles-manual/red-inactive6.png
+r ../tiles-manual/red-inactive7.png
 { ../tiles-manual/laser-left.png
 } ../tiles-manual/laser-right.png
 ^ ../tiles-manual/laser-up.png

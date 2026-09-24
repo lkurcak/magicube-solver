@@ -94,6 +94,9 @@ pub enum CubeSource {
     Glass,
     /// A materialized red cube, present while a red pressure plate is pressed.
     Red,
+    /// A cube that never falls and cannot be pushed. It copies every
+    /// single-tile move of the player's cube, if its own target tile is free.
+    Blue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -213,26 +216,27 @@ impl Level {
         }
     }
 
-    fn wrap_below(&self, mut position: Position) -> Position {
-        if position.y >= self.height as isize {
-            position.y = 0;
-        }
+    /// Maps a position that left the map through any edge back onto the
+    /// opposite edge.
+    fn wrap(&self, mut position: Position) -> Position {
+        position.x = position.x.rem_euclid(self.width as isize);
+        position.y = position.y.rem_euclid(self.height as isize);
         position
     }
 
     /// Whether this occupiable position is immediately above a goal pedestal.
     pub fn is_goal(&self, position: Position) -> bool {
-        self.tile_at(position.offset(0, 1)) == Tile::Pedestal
+        self.tile_at(self.wrap(position.offset(0, 1))) == Tile::Pedestal
     }
 
     /// Whether this occupiable position is immediately above a pressure-plate base.
     pub fn is_pressure_plate(&self, position: Position) -> bool {
-        self.tile_at(position.offset(0, 1)) == Tile::PressurePlateBase
+        self.tile_at(self.wrap(position.offset(0, 1))) == Tile::PressurePlateBase
     }
 
     /// Whether this occupiable position is immediately above a red pressure-plate base.
     pub fn is_red_pressure_plate(&self, position: Position) -> bool {
-        self.tile_at(position.offset(0, 1)) == Tile::RedPressurePlateBase
+        self.tile_at(self.wrap(position.offset(0, 1))) == Tile::RedPressurePlateBase
     }
 
     pub(crate) fn has_goal(&self) -> bool {
@@ -291,6 +295,7 @@ impl GameState {
     /// `v` are solid laser emitters firing left, up, right, and down; `T` is a
     /// solid laser trigger. `r` is a red cube and `R` a solid red pressure-plate
     /// base; red cubes start materialized if a red plate is already pressed.
+    /// `b` is a blue cube, which follows the player's cube instead of falling.
     pub fn from_ascii(map: &str) -> Result<Self, ParseLevelError> {
         Self::from_ascii_with_settings(map, GameSettings::default())
     }
@@ -341,10 +346,11 @@ impl GameState {
                     'v' => Tile::LaserEmitter(LaserDirection::Down),
                     'T' => Tile::LaserTrigger,
                     '?' => Tile::Unknown,
-                    'C' | 'g' | 'O' => {
+                    'C' | 'g' | 'b' | 'O' => {
                         let source = match symbol {
                             'C' => CubeSource::Map,
                             'g' => CubeSource::Glass,
+                            'b' => CubeSource::Blue,
                             _ => CubeSource::Player,
                         };
                         if source == CubeSource::Player
@@ -522,8 +528,7 @@ impl GameState {
     }
 
     /// The first blocking position along a beam, or the first position outside
-    /// the map. Only bodies exist beyond the map, and the beam cannot hit a
-    /// trigger there.
+    /// the map.
     fn laser_beam_end(&self, emitter: Position, direction: LaserDirection) -> Position {
         let mut position = direction.step(emitter);
         while self.level.contains(position) && !self.blocks_laser(position) {
@@ -624,7 +629,7 @@ impl GameState {
     }
 
     fn is_grounded_ignoring_plate_cube(&self, ignored_cube: Option<usize>) -> bool {
-        let support = self.player.position.offset(0, 1);
+        let support = self.level.wrap(self.player.position.offset(0, 1));
         if self.is_solid_tile_ignoring_plate_cube(support, ignored_cube) {
             return true;
         }
@@ -639,12 +644,14 @@ impl GameState {
         cube: usize,
         ignored_cube: Option<usize>,
     ) -> bool {
-        let mut support = self
-            .level
-            .wrap_below(self.cubes[cube].position.offset(0, 1));
+        if self.cubes[cube].source == CubeSource::Blue {
+            return true;
+        }
+        let mut support = self.level.wrap(self.cubes[cube].position.offset(0, 1));
         // Cubes remain solid collision bodies while falling, but they provide
         // ground support only when the whole vertical stack is stable. Follow
-        // the stack until it reaches terrain that blocks the bottom cube.
+        // the stack until it reaches terrain or a blue cube that blocks the
+        // bottom cube.
         // The bounded loop also handles a wrapped column of mutually supporting
         // cubes, which cannot move under the same gravity collision rules.
         for _ in 0..=self.cubes.len() {
@@ -656,7 +663,10 @@ impl GameState {
             let Some(cube) = self.cubes.iter().find(|cube| cube.position == support) else {
                 return false;
             };
-            support = self.level.wrap_below(cube.position.offset(0, 1));
+            if cube.source == CubeSource::Blue {
+                return true;
+            }
+            support = self.level.wrap(cube.position.offset(0, 1));
         }
         true
     }
@@ -679,7 +689,9 @@ impl GameState {
     /// this forced update when playing or searching for solutions.
     /// Walking pushes any contiguous horizontal chain of cubes one tile if the
     /// space beyond it is not solid and the player is grounded (unless airborne
-    /// pushing is enabled). A blocked push leaves the whole chain in place but
+    /// pushing is enabled). Blue cubes cannot be pushed; they copy each
+    /// single-tile push or fall of the player's cube instead. A chain that
+    /// reaches a blue cube after the player's cube carries it along. A blocked push leaves the whole chain in place but
     /// still advances time, including airtime and gravity.
     ///
     /// An update resolves the action, moves the projectile by up to the configured
@@ -788,9 +800,13 @@ impl GameState {
         if !self.can_shoot() {
             return false;
         }
-        let adjacent = self.player.position.offset(direction.dx(), 0);
+        let adjacent = self
+            .level
+            .wrap(self.player.position.offset(direction.dx(), 0));
         // Validate before removing anything: a blocked shot preserves the world.
-        if self.blocks_projectile(adjacent) {
+        // Any solid body next to the player blocks the shot, including glass
+        // cubes that projectiles otherwise pass through.
+        if self.blocks_projectile(adjacent) || self.is_solid(adjacent) {
             return false;
         }
         self.cubes.retain(|cube| cube.source != CubeSource::Player);
@@ -804,7 +820,9 @@ impl GameState {
     fn advance_projectile(&mut self, swept_cube_positions: &[Position]) -> Option<usize> {
         let mut projectile = self.projectile.take()?;
         for _ in 0..self.settings.projectile_tiles_per_update {
-            let target = projectile.position.offset(projectile.direction.dx(), 0);
+            let target = self
+                .level
+                .wrap(projectile.position.offset(projectile.direction.dx(), 0));
             if self.blocks_projectile(target) || swept_cube_positions.contains(&target) {
                 // The cube cannot spawn inside a skull or a glass cube.
                 if self.level.tile_at(projectile.position) != Tile::Skull
@@ -910,7 +928,7 @@ impl GameState {
                 let real_pass = swept_cube_positions.is_none();
                 match body {
                     None if player_falls => {
-                        let target = self.level.wrap_below(self.player.position.offset(0, 1));
+                        let target = self.level.wrap(self.player.position.offset(0, 1));
                         if !blocks_fall(self, target, false) {
                             self.player.position = target;
                             if real_pass {
@@ -918,10 +936,10 @@ impl GameState {
                             }
                         }
                     }
-                    Some(index) => {
-                        let target = self
-                            .level
-                            .wrap_below(self.cubes[index].position.offset(0, 1));
+                    Some(index) if self.cubes[index].source != CubeSource::Blue => {
+                        let target = self.level.wrap(self.cubes[index].position.offset(0, 1));
+                        let gates_closed = lasers_lit
+                            || self.pressure_plates_pressed_ignoring_cube(ignored_plate_cube);
                         if !blocks_fall(self, target, true) {
                             self.cubes[index].position = target;
                             if let Some(swept) = swept_cube_positions
@@ -929,6 +947,15 @@ impl GameState {
                                 .filter(|_| self.cubes[index].source != CubeSource::Glass)
                             {
                                 swept.push(target);
+                            }
+                            if self.cubes[index].source == CubeSource::Player {
+                                self.move_blue_cubes(
+                                    0,
+                                    1,
+                                    &[],
+                                    gates_closed,
+                                    swept_cube_positions.as_deref_mut(),
+                                );
                             }
                             if target == self.player.position {
                                 self.status = GameStatus::GameOver;
@@ -938,7 +965,7 @@ impl GameState {
                             }
                         }
                     }
-                    None => {}
+                    None | Some(_) => {}
                 }
             }
             if self.status == GameStatus::GameOver {
@@ -986,6 +1013,7 @@ impl GameState {
                 CubeSource::Player => 'O',
                 CubeSource::Glass => 'g',
                 CubeSource::Red => 'r',
+                CubeSource::Blue => 'b',
             }
         } else if let Some(projectile) = self.projectile.filter(|p| p.position == position) {
             match projectile.direction {
@@ -1001,7 +1029,7 @@ impl GameState {
 
     fn try_walk(&mut self, direction: Direction) -> bool {
         let dx = direction.dx();
-        let destination = self.player.position.offset(dx, 0);
+        let destination = self.level.wrap(self.player.position.offset(dx, 0));
         let mut target = destination;
         let mut chain = Vec::new();
         // Check the entire chain before moving anything. Only walking pushes;
@@ -1011,6 +1039,18 @@ impl GameState {
                 return false;
             }
             match self.cubes.iter().position(|cube| cube.position == target) {
+                // A blue cube ahead of the player's cube moves the same way
+                // at the same time, so the chain carries it along.
+                Some(index) if self.cubes[index].source == CubeSource::Blue => {
+                    if !chain
+                        .iter()
+                        .any(|&index: &usize| self.cubes[index].source == CubeSource::Player)
+                    {
+                        return false;
+                    }
+                    chain.push(index);
+                    target = self.level.wrap(target.offset(dx, 0));
+                }
                 Some(index) => {
                     if !self.cube_is_grounded_ignoring_plate_cube(index, None)
                         || (!self.settings.allow_airborne_pushing && !self.is_grounded())
@@ -1018,7 +1058,7 @@ impl GameState {
                         return false;
                     }
                     chain.push(index);
-                    target = target.offset(dx, 0);
+                    target = self.level.wrap(target.offset(dx, 0));
                 }
                 None => {
                     if !chain.is_empty() && self.level.tile_at(target) == Tile::Skull {
@@ -1028,11 +1068,97 @@ impl GameState {
                 }
             }
         }
-        for index in chain {
-            self.cubes[index].position = self.cubes[index].position.offset(dx, 0);
+        let pushed_player_cube = chain
+            .iter()
+            .any(|&index| self.cubes[index].source == CubeSource::Player);
+        let gates_closed = self.pressure_plates_active();
+        for &index in &chain {
+            self.cubes[index].position = self.level.wrap(self.cubes[index].position.offset(dx, 0));
         }
         self.player.position = destination;
+        if pushed_player_cube {
+            self.move_blue_cubes(dx, 0, &chain, gates_closed, None);
+        }
         true
+    }
+
+    /// Moves every blue cube one tile along with the player's cube. Blue cubes
+    /// leading in the direction of travel move first, so a line of them moves
+    /// together. A horizontally moving blue cube pushes a chain of cubes ahead
+    /// of it like the player does. A blue cube stays put when solid terrain, a
+    /// skull, the player, or an immovable cube occupies its target. Gates count
+    /// as closed according to `gates_closed`, the plate state from before the
+    /// player's cube moved, so a gate its own push opens still blocks this
+    /// move. Skips the `moved` cubes, and records moved-to tiles in `swept`.
+    fn move_blue_cubes(
+        &mut self,
+        dx: isize,
+        dy: isize,
+        moved: &[usize],
+        gates_closed: bool,
+        mut swept: Option<&mut Vec<Position>>,
+    ) {
+        let mut blue: Vec<_> = (0..self.cubes.len())
+            .filter(|&index| {
+                self.cubes[index].source == CubeSource::Blue && !moved.contains(&index)
+            })
+            .collect();
+        blue.sort_by_key(|&index| {
+            let position = self.cubes[index].position;
+            Reverse(position.x * dx + position.y * dy)
+        });
+        for index in blue {
+            let target = self.level.wrap(self.cubes[index].position.offset(dx, dy));
+            let Some(chain) = self.blue_push_chain(target, dx, dy, moved, gates_closed) else {
+                continue;
+            };
+            for moved_index in chain.into_iter().chain([index]) {
+                let target = self.level.wrap(self.cubes[moved_index].position.offset(dx, dy));
+                self.cubes[moved_index].position = target;
+                if let Some(swept) = swept.as_deref_mut() {
+                    swept.push(target);
+                }
+            }
+        }
+    }
+
+    /// Returns the cubes a blue cube moving onto `target` pushes along, or
+    /// `None` when the move is blocked. Only horizontal moves push, and only a
+    /// contiguous chain of grounded non-blue cubes that are not in `moved`.
+    fn blue_push_chain(
+        &self,
+        mut target: Position,
+        dx: isize,
+        dy: isize,
+        moved: &[usize],
+        gates_closed: bool,
+    ) -> Option<Vec<usize>> {
+        let mut chain = Vec::new();
+        loop {
+            let solid_tile = if self.level.tile_at(target).is_gate() {
+                gates_closed && !self.body_occupies(target)
+            } else {
+                self.is_solid_tile(target)
+            };
+            if solid_tile
+                || self.player.position == target
+                || self.level.tile_at(target) == Tile::Skull
+            {
+                return None;
+            }
+            let Some(index) = self.cubes.iter().position(|cube| cube.position == target) else {
+                return Some(chain);
+            };
+            if dy != 0
+                || self.cubes[index].source == CubeSource::Blue
+                || moved.contains(&index)
+                || !self.cube_is_grounded_ignoring_plate_cube(index, None)
+            {
+                return None;
+            }
+            chain.push(index);
+            target = self.level.wrap(target.offset(dx, dy));
+        }
     }
 
     fn try_move(&mut self, dx: isize, dy: isize) -> bool {
@@ -1045,7 +1171,7 @@ impl GameState {
         dy: isize,
         ignored_cube: Option<usize>,
     ) -> bool {
-        let position = self.level.wrap_below(self.player.position.offset(dx, dy));
+        let position = self.level.wrap(self.player.position.offset(dx, dy));
         if self.is_solid_ignoring_plate_cube(position, ignored_cube) {
             return false;
         }

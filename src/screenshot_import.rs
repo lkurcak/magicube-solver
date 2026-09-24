@@ -718,11 +718,19 @@ pub fn detect_grid_phase(
 }
 
 pub fn png_files(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    files_with_extension(directory, "png")
+}
+
+/// Files directly in `directory` with the given extension, in natural stem order.
+pub fn files_with_extension(
+    directory: &Path,
+    extension: &str,
+) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut paths: Vec<_> = fs::read_dir(directory)?
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "png"))
+        .filter(|path| path.extension().is_some_and(|found| found == extension))
         .collect();
     paths.sort_by(|a, b| natural_stem(a).cmp(&natural_stem(b)).then_with(|| a.cmp(b)));
     Ok(paths)
@@ -795,6 +803,7 @@ fn is_label_symbol(symbol: char) -> bool {
             | 'C'
             | 'g'
             | 'r'
+            | 'b'
             | 'O'
             | '@'
             | '{'

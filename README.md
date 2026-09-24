@@ -38,6 +38,13 @@ template or a manual level example, then rebuild. The converter exports availabl
 maps even when some levels fail, and exits unsuccessfully if any entry is corrupted.
 It accepts optional `[screenshots-dir] [levels-dir] [atlas-dir] [labels-dir]` arguments.
 
+Hand-drawn levels without a screenshot go in `data/custom-levels/` as `<name>.txt`
+ASCII maps (the same alphabet as `GameState::from_ascii`). The build bundles them
+after the screenshot levels as **Custom <name>**, in natural order, so they can be
+played, solved, and replayed from the selector like any other level. A custom map
+that does not parse or has no goal is listed as **Corrupted**. Custom levels are
+not part of the project manifest or `magicube-progress`.
+
 ## Project progress dashboard
 
 `data/` contains only authored, trusted inputs. `data/level-manifest.txt` lists
@@ -71,7 +78,7 @@ Requested solves run before the rest of the startup queue. Requesting the level
 that is currently being solved restarts it with the new limit. The previous
 solution stays replayable until the new result replaces it. Cancelling restores
 the previous result and leaves the cache unchanged. Searches without a limit may
-never finish on open maps and can use unbounded memory, so cancel them with
+take a very long time on maps with many cubes and can use a lot of memory, so cancel them with
 **C**. A cached state-limit failure is reused only when its limit is at least the
 default one. A cached exhausted (unsolvable) search is reused under any limit.
 
@@ -162,7 +169,7 @@ The status line shows position, airtime, game status, and the last input.
 `C` represents a map cube, `O` the player's cube, and `<`/`>` a projectile.
 `P` is a pressure-plate base, `G` is a goal pedestal, and `D` is a gate.
 `R` is a red pressure-plate base and `r` a red cube, drawn bright red while
-materialized and dark red while inactive.
+materialized and dark red while inactive. `b` is a blue cube.
 `{`, `^`, `}`, and `v` are laser emitters firing left, up, right, and down; `T`
 is a laser trigger. Beams are drawn as red `-`, `|`, or `+` (crossing), and a
 trigger turns white while a beam hits it.
@@ -330,10 +337,9 @@ immediately. Already-won states return an empty solution and game-over states
 return `Unsolvable`, regardless of the cap; both require no search.
 
 `Unsolvable` means the reachable search space was exhausted (or the initial state
-was game over). `StateLimitReached` makes no claim about solvability. Open maps
-allow objects to travel indefinitely beyond the horizontal edges, so searches
-without a cap may never finish and can consume unbounded memory. Search does not
-clip horizontal coordinates or change the simulator's rules.
+was game over). `StateLimitReached` makes no claim about solvability. Map edges wrap,
+so every level has finitely many states, but a search without a cap can still
+take a very long time and consume a lot of memory on levels with many cubes.
 
 `solve_with_progress` reports statistics periodically. `solve_cancellable` is
 the same, except its callback can return `ControlFlow::Break(())` to stop the
@@ -443,7 +449,7 @@ further simulation inputs do nothing.
 and `T` laser triggers are solid, like walls. A beam travels until the first
 wall, feature base, emitter, trigger, unknown tile, or non-glass cube; it passes
 through empty space, torches, skulls, glass cubes, and open gates, and continues
-indefinitely beyond an open map edge. A gate closed by an occupied pressure plate
+indefinitely beyond an open map edge (beams do not wrap). A gate closed by an occupied pressure plate
 stops beams. A gate closed only by a laser trigger does not, which keeps a
 trigger from cutting off its own beam. A trigger hit by a beam counts as an
 active pressure plate. Beams are derived from the current state and never appear
@@ -467,6 +473,21 @@ gravity substeps, and at the end of the update. Like gates, they ignore a
 freshly spawned cube on a red plate until the update's gravity pass finishes.
 A red cube starts materialized when a red plate is pressed in the initial map.
 
+`b` blue cubes never fall and cannot be pushed directly: a pushed chain that
+reaches one before reaching the player's cube is blocked. A chain that reaches
+one after the player's cube carries it along, together with any cubes beyond,
+since the blue cube moves the same way at the same time. Each time the player's `O` cube moves one tile, by being
+pushed or by falling, every blue cube tries to make the same one-tile move,
+wrapping from the bottom to the top like falling bodies. Blue cubes leading in
+the direction of travel move first, so a line of them moves together. A blue
+cube whose target holds solid terrain, a closed gate, a skull, the player, or
+any cube stays where it is. Gates count as closed or open as they were just
+before the player's cube moved, so a push that steps the player off a plate
+still finds the gate it opens closed. Shooting and respawning the player's cube does not
+move blue cubes, nor does any other body moving. Otherwise blue cubes are solid
+like map cubes: they give stable support, press plates, and stop beams and
+projectiles.
+
 `G` is a solid goal pedestal. At the end of an update, the player's `O` cube
 occupying the cell immediately above a pedestal wins, whether
 it arrived by spawning, pushing, or falling. A map cube or the player reaching
@@ -474,13 +495,14 @@ that cell does not win. A `D` may occupy the goal cell independently, so its
 passability follows the pressure-plate gate rules. Winning freezes the state until
 undo or restart.
 
-Map coordinates increase rightward/downward. Moving below the level's bottom
-boundary wraps a player or falling cube to the top row. The map itself does not
-repeat: space above the top and beyond either horizontal edge is empty. Torches
+Map coordinates increase rightward/downward. Every map edge wraps: falling
+below the bottom row lands a player or cube on the top row, jumping above the
+top row lands the player on the bottom row (or is blocked by terrain there), and
+walking, pushing, or shooting past either horizontal edge wraps to the opposite
+column. Laser beams do not wrap; they end at the map's edges. Torches
 are decorative. Skulls are passable for players and projectiles but act as walls
-for cubes. `to_ascii()` renders only the original map rectangle, so use
-`player().position` to inspect a player outside it.
+for cubes.
 Maps require exactly one `@` and can include map cubes (`C`), glass cubes (`g`),
-red cubes (`r`), at most one existing player cube (`O`), gates (`D`), goal
+red cubes (`r`), blue cubes (`b`), at most one existing player cube (`O`), gates (`D`), goal
 pedestals (`G`), pressure-plate bases (`P`), red pressure-plate bases (`R`), laser emitters (`{`, `^`, `}`, `v`), and laser triggers (`T`). Ragged
 rows are padded with empty tiles, matching the screenshot importer's format.

@@ -88,7 +88,7 @@ fn projectile_checks_each_traversed_tile_and_spawns_in_the_last_empty_one() {
 
 #[test]
 fn obstacles_block_shots_and_blocked_shots_preserve_the_previous_cube() {
-    for obstacle in ['#', 'C', 'O', '?'] {
+    for obstacle in ['#', 'C', 'O', '?', 'g', 'b', 'P', 'G', 'T'] {
         let initial = game(&format!(
             r#"
 ######
@@ -151,9 +151,9 @@ fn projectiles_pass_through_glass_cubes() {
 fn projectile_stopping_inside_a_glass_cube_does_not_spawn_the_player_cube() {
     let fired = game(
         r#"
-#####
-#@g##
-#####
+######
+#@ g##
+######
 "#,
     )
     .step(Shoot)
@@ -430,7 +430,7 @@ fn shooting_requires_support_by_default_and_fun_mode_allows_jumps_and_falls() {
 
 
 
-#
+##########
 "#,
             ),
             initial.settings(),

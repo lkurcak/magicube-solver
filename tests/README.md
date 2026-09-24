@@ -5,7 +5,7 @@ player, and screenshot importer tests.
 
 `movement.rs` contains the before/after movement drawings and update-by-update
 jump and gravity checks. `simulation_maps.rs` covers parsing imported maps and
-open map edges. `shooting.rs` covers aiming, shot recovery, projectile collisions, cube ownership,
+wrapping map edges. `shooting.rs` covers aiming, shot recovery, projectile collisions, cube ownership,
 falling, crushing, default grounded-only shots, and optional airborne shots.
 `pushing.rs` covers cube chains, blocked and falling cubes, pushing off ledges,
 grounded-only defaults, and independent airborne-pushing opt-in during jumps.
@@ -15,6 +15,8 @@ shelter, and triggers acting as pressure plates.
 `red_cubes.rs` covers red plates and red cubes: intangible inactive cubes,
 materializing only into a free tile, dematerializing in place, pushing and plate
 pressing while active, and independence from gates and laser triggers.
+`blue_cubes.rs` covers blue cubes floating and supporting, resisting direct
+pushes, being carried by the player cube, and copying the player cube's pushes and falls tile by tile unless blocked.
 `goals.rs` covers passable positions above solid pedestals and winning with the
 player's cube.
 `solutions.rs` replays saved solutions for levels 1–7, solves each with the default
@@ -22,7 +24,7 @@ state cap, replays the solver's result, and checks that it is no longer than the
 saved input sequence. Length bounds come directly from the saved inputs.
 `solver.rs` finds and replays shortest solutions for tiny fixtures, compares them
 with exhaustive enumeration of shorter inputs, and covers terminal states,
-aiming/recovery, state limits, cycles, and open maps.
+aiming/recovery, state limits, cycles, and exhausting wrapped maps.
 `level_drawing.rs` checks the ASCII fixture helper.
 `catalog.rs` checks screenshot discovery and natural ordering, isolated import
 failures, learning new tile patterns across levels, conflicting teaching examples,

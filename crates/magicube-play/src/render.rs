@@ -291,6 +291,7 @@ fn draw_board(
                 'P' => Color::Yellow,
                 'C' => Color::Blue,
                 'g' => Color::DarkCyan,
+                'b' => Color::DarkBlue,
                 'r' if state.inactive_red_cubes().contains(&position) => Color::DarkRed,
                 'r' => Color::Red,
                 'R' => Color::DarkRed,

@@ -43,6 +43,7 @@ pub fn assert_cube_layout_eq(actual: &[Cube], expected: &[Cube]) {
             CubeSource::Player => 1,
             CubeSource::Glass => 2,
             CubeSource::Red => 3,
+            CubeSource::Blue => 4,
         };
         (cube.position.y, cube.position.x, source)
     }

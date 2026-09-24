@@ -64,8 +64,8 @@ pub struct SolveResult {
 /// left, right, jump, shoot, wait. The returned inputs replay directly through
 /// [`GameState::step`], even when starting while aiming or recovering.
 ///
-/// Search is synchronous and breadth-first. States outside the map remain valid;
-/// horizontally unbounded coordinates can prevent exhaustion. Reaching the
+/// Search is synchronous and breadth-first. Map edges wrap, so the reachable
+/// state space is finite, though it can be very large. Reaching the
 /// configured state limit is therefore distinct from proving that a level is
 /// unsolvable.
 ///
@@ -109,7 +109,7 @@ pub fn solve_with_progress(
 
 /// Equivalent to [`solve_with_progress`], except that the callback can stop the
 /// search by returning [`ControlFlow::Break`], which returns `None`. Use this
-/// for searches without a state limit, which may otherwise never finish.
+/// for searches without a state limit, which may otherwise run for a very long time.
 pub fn solve_cancellable(
     initial: &GameState,
     options: SolveOptions,

@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn build_bundles_the_screenshot_only_levels_and_clean_entries_launch() {
-        for id in ["9", "10"] {
+        for id in ["9", "10", "custom-1"] {
             let index = crate::BUNDLED_LEVELS
                 .iter()
                 .position(|level| level.id == id)

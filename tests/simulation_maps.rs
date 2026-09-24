@@ -1,6 +1,9 @@
 mod support;
 
-use magicube_solver::{GameInput, GameState, ParseLevelError, Position, Tile};
+use magicube_solver::{
+    GameInput, GameState, GameStatus, ParseLevelError, Position, SolveOptions, SolveOutcome, Tile,
+    solve,
+};
 use support::{assert_level_eq, level};
 
 #[test]
@@ -64,9 +67,9 @@ fn gates_above_pedestals_round_trip_and_expose_both_capabilities() {
 }
 
 #[test]
-fn a_top_row_pedestal_has_a_goal_position_above_the_map() {
-    let game = GameState::from_ascii("@G\n##").unwrap();
-    assert!(game.level().is_goal(Position { x: 1, y: -1 }));
+fn a_top_row_pedestal_has_a_goal_position_on_the_bottom_row() {
+    let game = GameState::from_ascii("@G\n# ").unwrap();
+    assert!(game.level().is_goal(Position { x: 1, y: 1 }));
     assert!(!game.level().is_goal(Position { x: 1, y: 0 }));
 }
 
@@ -137,25 +140,76 @@ t
 }
 
 #[test]
-fn jumping_above_the_level_does_not_wrap_or_repeat_the_map() {
+fn jumping_above_the_level_wraps_to_the_bottom() {
+    let initial = GameState::from_ascii("@\n#\n ").unwrap();
+    let jumping = initial.step(GameInput::Jump);
+    assert_eq!(jumping.player().position, Position { x: 0, y: 2 });
+}
+
+#[test]
+fn jumping_from_the_top_row_is_blocked_by_bottom_row_terrain() {
+    let initial = GameState::from_ascii("@ \n# \n##").unwrap();
+    let jumping = initial.step(GameInput::Jump);
+    assert_eq!(jumping.player().position, Position { x: 0, y: 0 });
+}
+
+#[test]
+fn walking_and_pushing_past_a_side_edge_wraps_to_the_opposite_column() {
     let initial = GameState::from_ascii(&level(
         r#"
-@
-#
+C@  
+####
 "#,
     ))
     .unwrap();
-    let jumping = initial.step(GameInput::Jump);
-    assert_eq!(jumping.player().position, Position { x: 0, y: -1 });
-    assert_eq!(
-        jumping.level().tile_at(Position { x: 0, y: -1 }),
-        Tile::Empty
-    );
-    assert_eq!(
-        jumping.level().tile_at(Position { x: 0, y: 2 }),
-        Tile::Empty
-    );
-    assert_eq!(jumping.step(GameInput::Wait).step(GameInput::Wait), initial);
+    let pushed = initial.step(GameInput::Left);
+    assert_eq!(pushed.player().position, Position { x: 0, y: 0 });
+    assert_eq!(pushed.cubes()[0].position, Position { x: 3, y: 0 });
+    let walked = pushed.step(GameInput::Left);
+    assert_eq!(walked.player().position, Position { x: 3, y: 0 });
+    assert_eq!(walked.cubes()[0].position, Position { x: 2, y: 0 });
+}
+
+#[test]
+fn projectiles_wrap_past_a_side_edge() {
+    let initial = GameState::from_ascii(&level(
+        r#"
+ #@  
+#####
+"#,
+    ))
+    .unwrap();
+    let fired = initial.step(GameInput::Shoot).step(GameInput::Right);
+    let landed = fired.step(GameInput::Wait).step(GameInput::Wait);
+    assert_eq!(landed.projectile(), None);
+    assert_eq!(landed.cubes()[0].position, Position { x: 0, y: 0 });
+}
+
+#[test]
+fn custom_level_1_is_solved_through_side_and_bottom_wrapping() {
+    let initial = GameState::from_ascii(include_str!("../data/custom-levels/1.txt")).unwrap();
+    use GameInput::{Left, Right, Shoot, Wait};
+    let step = |state: GameState, inputs: &[GameInput]| {
+        inputs.iter().fold(state, |state, &input| state.step(input))
+    };
+    // Walk off the right edge into the bottom-left room.
+    let state = step(initial.clone(), &[Right; 6]);
+    assert_eq!(state.player().position, Position { x: 0, y: 5 });
+    // Fall through the floor gap and land in the top-left room.
+    let state = step(state, &[Right, Right, Left]);
+    assert_eq!(state.player().position, Position { x: 2, y: 1 });
+    // Walk off the left edge and drop into the room right of the goal.
+    let state = step(state, &[Left; 7]);
+    assert_eq!(state.player().position, Position { x: 6, y: 3 });
+    // The shot wraps around the right edge and stops against the goal's wall.
+    let state = step(state, &[Shoot, Right, Wait, Left]);
+    assert_eq!(state.status(), GameStatus::Won);
+
+    let result = solve(&initial, SolveOptions::default());
+    let SolveOutcome::Solved(inputs) = result.outcome else {
+        panic!("expected a solution, got {result:?}");
+    };
+    assert_eq!(inputs.len(), 20);
 }
 
 #[test]

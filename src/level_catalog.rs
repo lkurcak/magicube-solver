@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::GameState;
 use crate::screenshot_import::{
-    Atlas, ImportedLevel, import_level_with_labels, load_png, png_files,
+    Atlas, ImportedLevel, files_with_extension, import_level_with_labels, load_png, png_files,
 };
 
 #[derive(Debug)]
@@ -127,6 +127,50 @@ pub fn generate_catalog(
     Ok(LevelCatalog { entries, inputs })
 }
 
+/// A hand-drawn level that has no screenshot, stored as `<stem>.txt`.
+#[derive(Debug)]
+pub struct CustomLevel {
+    pub id: String,
+    pub name: String,
+    pub path: PathBuf,
+    pub map: Option<String>,
+    pub issues: Vec<String>,
+}
+
+/// Loads every `.txt` map in `directory` in natural order. A missing directory
+/// has no levels; unreadable or invalid maps become level issues.
+pub fn load_custom_levels(directory: &Path) -> Result<Vec<CustomLevel>, Box<dyn Error>> {
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    files_with_extension(directory, "txt")?
+        .into_iter()
+        .map(|path| {
+            let stem = path
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .ok_or("custom level filenames must be UTF-8")?
+                .to_owned();
+            let (map, issues) = match fs::read_to_string(&path) {
+                Ok(text) => {
+                    let map = text.trim_end_matches(['\n', '\r']).to_owned();
+                    let issues = validate_map(&map);
+                    (Some(map), issues)
+                }
+                Err(error) => (None, vec![format!("{}: {error}", path.display())]),
+            };
+            Ok(CustomLevel {
+                id: format!("custom-{stem}"),
+                name: format!("Custom {stem}"),
+                path,
+                map,
+                issues,
+            })
+        })
+        .collect()
+}
+
 fn validate_map(map: &str) -> Vec<String> {
     let mut issues = Vec::new();
     let has_goal = match GameState::from_ascii(map) {
@@ -145,6 +189,24 @@ fn validate_map(map: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_levels_load_in_natural_order_with_map_issues() {
+        let root = std::env::temp_dir().join(format!("magicube-custom-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("10.txt"), "@ \n#G\n").unwrap();
+        fs::write(root.join("2.txt"), "@\n#\n").unwrap();
+        fs::write(root.join("notes.md"), "ignored").unwrap();
+        let levels = load_custom_levels(&root).unwrap();
+        let ids: Vec<_> = levels.iter().map(|level| level.id.as_str()).collect();
+        assert_eq!(ids, ["custom-2", "custom-10"]);
+        assert_eq!(levels[0].issues, ["map has no goal"]);
+        assert_eq!(levels[1].name, "Custom 10");
+        assert_eq!(levels[1].map.as_deref(), Some("@ \n#G"));
+        assert!(levels[1].issues.is_empty());
+        fs::remove_dir_all(&root).unwrap();
+        assert!(load_custom_levels(&root).unwrap().is_empty());
+    }
 
     #[test]
     fn current_manual_examples_are_clean_and_reproduced() {
