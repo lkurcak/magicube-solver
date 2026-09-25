@@ -9,6 +9,6 @@ pub use simulation::{
     LaserDirection, Level, ParseLevelError, PlayerMode, PlayerState, Position, Projectile, Tile,
 };
 pub use solver::{
-    SolveOptions, SolveOutcome, SolveResult, SolveStats, solve, solve_cancellable,
-    solve_with_progress,
+    Algorithm, Heuristic, SolveOptions, SolveOutcome, SolveResult, SolveStats, solution_cost,
+    solve, solve_cancellable, solve_with_progress,
 };

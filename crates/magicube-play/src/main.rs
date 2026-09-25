@@ -75,7 +75,7 @@ until a save. The saved filename is shown in-game and printed when you quit.
 The selector's saved-replay browser uses this same directory.
 
 Replay a saved attempt with --replay (uses its embedded map), or find and replay
-a shortest solution with --solve. With no level file, --solve opens the selector.
+a cheapest solution with --solve. With no level file, --solve opens the selector.
 The solver searches up to one million states and reports if that limit is reached.
 Replay starts paused at step 0. Each step is one recorded input, including
 aiming and recovery waits. Partial attempts and game-over saves also work.

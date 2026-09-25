@@ -19,11 +19,11 @@ pressing while active, and independence from gates and laser triggers.
 pushes, being carried by the player cube, and copying the player cube's pushes and falls tile by tile unless blocked.
 `goals.rs` covers passable positions above solid pedestals and winning with the
 player's cube.
-`solutions.rs` replays saved solutions for levels 1–7, solves each with the default
-state cap, replays the solver's result, and checks that it is no longer than the
-saved input sequence. Length bounds come directly from the saved inputs.
-`solver.rs` finds and replays shortest solutions for tiny fixtures, compares them
-with exhaustive enumeration of shorter inputs, and covers terminal states,
+`solutions.rs` replays saved solutions for levels 1–7 and 18, solves each with the default
+state cap, replays the solver's result, and checks that it costs no more than the
+saved input sequence. Cost bounds come directly from the saved inputs.
+`solver.rs` finds and replays cheapest solutions for tiny fixtures, compares them
+with exhaustive enumeration of shorter inputs, checks input costs, and covers terminal states,
 aiming/recovery, state limits, cycles, and exhausting wrapped maps.
 `level_drawing.rs` checks the ASCII fixture helper.
 `catalog.rs` checks screenshot discovery and natural ordering, isolated import

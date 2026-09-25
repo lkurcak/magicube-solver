@@ -2,8 +2,8 @@ mod support;
 
 use magicube_solver::GameInput::{Jump, Left, Right, Shoot, Wait};
 use magicube_solver::{
-    GameInput, GameSettings, GameState, GameStatus, PlayerMode, SolveOptions, SolveOutcome,
-    SolveStats, solve, solve_cancellable,
+    Algorithm, GameInput, GameSettings, GameState, GameStatus, Heuristic, PlayerMode, SolveOptions,
+    SolveOutcome, SolveStats, solution_cost, solve, solve_cancellable,
 };
 use support::level;
 
@@ -214,6 +214,7 @@ fn terminal_starts_need_no_search_even_with_a_zero_cap() {
             &initial,
             SolveOptions {
                 max_states: Some(0),
+                ..SolveOptions::default()
             },
         );
         assert_eq!(result.outcome, outcome);
@@ -230,13 +231,20 @@ fn exhausts_cycles_and_blocked_actions_in_a_finite_unsolvable_map() {
 ###G#
 "#,
     );
-    let result = solve(&initial, SolveOptions { max_states: None });
+    let result = solve(
+        &initial,
+        SolveOptions {
+            max_states: None,
+            ..SolveOptions::default()
+        },
+    );
     assert_eq!(result.outcome, SolveOutcome::Unsolvable);
+    // Both shots are blocked, so the aiming state is never stored.
     assert_eq!(
         result.stats,
         SolveStats {
-            discovered_states: 2,
-            expanded_states: 2,
+            discovered_states: 1,
+            expanded_states: 1,
         }
     );
     // Exactly filling the cap is allowed if no further distinct state is found.
@@ -244,7 +252,8 @@ fn exhausts_cycles_and_blocked_actions_in_a_finite_unsolvable_map() {
         solve(
             &initial,
             SolveOptions {
-                max_states: Some(2),
+                max_states: Some(1),
+                ..SolveOptions::default()
             },
         ),
         result
@@ -267,6 +276,7 @@ fn discards_fatal_successors_without_spending_the_state_budget_on_them() {
         &initial,
         SolveOptions {
             max_states: Some(2),
+            ..SolveOptions::default()
         },
     );
     assert_eq!(result.outcome, SolveOutcome::Unsolvable);
@@ -290,6 +300,7 @@ fn state_caps_include_the_start_and_the_winning_state() {
             &initial,
             SolveOptions {
                 max_states: Some(cap),
+                ..SolveOptions::default()
             },
         );
         assert_eq!(result.outcome, SolveOutcome::StateLimitReached);
@@ -300,6 +311,7 @@ fn state_caps_include_the_start_and_the_winning_state() {
         &initial,
         SolveOptions {
             max_states: Some(2),
+            ..SolveOptions::default()
         },
     );
     assert_eq!(result.outcome, SolveOutcome::Solved(vec![Right]));
@@ -314,7 +326,13 @@ fn walking_off_the_map_wraps_so_open_maps_are_exhausted() {
 @ G
 "#,
     );
-    let result = solve(&initial, SolveOptions { max_states: None });
+    let result = solve(
+        &initial,
+        SolveOptions {
+            max_states: None,
+            ..SolveOptions::default()
+        },
+    );
     assert_eq!(result.outcome, SolveOutcome::Unsolvable);
     assert_eq!(result.stats.discovered_states, 2);
 }
@@ -333,6 +351,7 @@ fn large_maps_reach_the_limit_instead_of_claiming_unsolvability() {
         &initial,
         SolveOptions {
             max_states: Some(100),
+            ..SolveOptions::default()
         },
     );
     assert_eq!(result.outcome, SolveOutcome::StateLimitReached);
@@ -350,14 +369,21 @@ fn unlimited_searches_on_large_maps_can_be_cancelled() {
 "#,
     );
     let mut reports = Vec::new();
-    let result = solve_cancellable(&initial, SolveOptions { max_states: None }, |stats| {
-        reports.push(stats.expanded_states);
-        if stats.expanded_states >= 20_000 {
-            std::ops::ControlFlow::Break(())
-        } else {
-            std::ops::ControlFlow::Continue(())
-        }
-    });
+    let result = solve_cancellable(
+        &initial,
+        SolveOptions {
+            max_states: None,
+            ..SolveOptions::default()
+        },
+        |stats| {
+            reports.push(stats.expanded_states);
+            if stats.expanded_states >= 20_000 {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        },
+    );
     assert_eq!(result, None);
     assert_eq!(reports, [1, 10_000, 20_000]);
 }
@@ -375,4 +401,207 @@ fn can_solve_by_jumping_through_the_top_edge() {
     );
     let inputs = solution(&initial);
     assert_eq!(inputs.first(), Some(&Jump));
+}
+
+const ASTAR: [Algorithm; 2] = [
+    Algorithm::AStar {
+        heuristic: Heuristic::Zero,
+        weight_percent: 100,
+    },
+    Algorithm::AStar {
+        heuristic: Heuristic::GoalDistance,
+        weight_percent: 100,
+    },
+];
+
+const SMALL_MAPS: [&str; 5] = [
+    r#"
+######
+#@O  #
+###G##
+"#,
+    r#"
+#######
+#     #
+#@  ###
+###G###
+"#,
+    r#"
+######
+#   ##
+#@#G##
+######
+"#,
+    r#"
+#########
+#D   @  #
+##G#P####
+"#,
+    r#"
+@#G#
+####
+ O  
+"#,
+];
+
+fn solved_with(initial: &GameState, options: SolveOptions) -> Vec<GameInput> {
+    let SolveOutcome::Solved(inputs) = solve(initial, options).outcome else {
+        panic!("expected a solution with {options:?}");
+    };
+    assert_eq!(replay(initial, &inputs).status(), GameStatus::Won);
+    inputs
+}
+
+#[test]
+fn unweighted_astar_finds_equally_cheap_solutions_with_any_heuristic() {
+    assert_eq!(SolveOptions::default().algorithm, ASTAR[0]);
+    assert!(!Algorithm::Bfs.is_optimal());
+    for map in SMALL_MAPS {
+        let initial = game(map);
+        let cheapest = solution_cost(&initial, &solution(&initial));
+        for algorithm in ASTAR {
+            let options = SolveOptions {
+                algorithm,
+                ..SolveOptions::default()
+            };
+            assert!(algorithm.is_optimal());
+            let inputs = solved_with(&initial, options);
+            assert_eq!(solution_cost(&initial, &inputs), cheapest, "{map}");
+        }
+        let bfs = SolveOptions {
+            algorithm: Algorithm::Bfs,
+            ..SolveOptions::default()
+        };
+        assert!(solution_cost(&initial, &solved_with(&initial, bfs)) >= cheapest);
+    }
+}
+
+#[test]
+fn pushes_cost_two_and_other_inputs_one() {
+    let push = game(
+        r#"
+######
+#@O  #
+###G##
+"#,
+    );
+    assert_eq!(solution_cost(&push, &[Right]), 2);
+    // Walking into a wall, aiming, firing and recovering push nothing.
+    let shot = game(
+        r#"
+#######
+#     #
+#@  ###
+###G###
+"#,
+    );
+    assert_eq!(solution_cost(&shot, &[Left, Shoot, Right, Wait]), 4);
+}
+
+#[test]
+fn weighted_astar_solutions_replay_to_a_win() {
+    let algorithm = Algorithm::AStar {
+        heuristic: Heuristic::GoalDistance,
+        weight_percent: 500,
+    };
+    assert!(!algorithm.is_optimal());
+    for map in SMALL_MAPS {
+        let initial = game(map);
+        let options = SolveOptions {
+            algorithm,
+            ..SolveOptions::default()
+        };
+        let inputs = solved_with(&initial, options);
+        assert!(solution_cost(&initial, &inputs) >= solution_cost(&initial, &solution(&initial)));
+    }
+}
+
+#[test]
+fn depth_limits_distinguish_too_short_searches_from_unsolvable_maps() {
+    let initial = game(
+        r#"
+#######
+#     #
+#@  ###
+###G###
+"#,
+    );
+    let cheapest = solution_cost(&initial, &solution(&initial));
+    for algorithm in ASTAR {
+        let limited = |max_depth| {
+            solve(
+                &initial,
+                SolveOptions {
+                    max_depth: Some(max_depth),
+                    algorithm,
+                    ..SolveOptions::default()
+                },
+            )
+            .outcome
+        };
+        assert_eq!(limited(0), SolveOutcome::DepthLimitReached);
+        assert_eq!(limited(cheapest - 1), SolveOutcome::DepthLimitReached);
+        let SolveOutcome::Solved(inputs) = limited(cheapest) else {
+            panic!("a solution fits within its own cost");
+        };
+        assert_eq!(solution_cost(&initial, &inputs), cheapest);
+
+        // No state is cut off when the whole space fits under the limit.
+        let unsolvable = game(
+            r#"
+#####
+#@# #
+###G#
+"#,
+        );
+        let result = solve(
+            &unsolvable,
+            SolveOptions {
+                max_depth: Some(10),
+                algorithm,
+                ..SolveOptions::default()
+            },
+        );
+        assert_eq!(result.outcome, SolveOutcome::Unsolvable);
+    }
+}
+
+#[test]
+fn astar_respects_state_limits_and_cancellation() {
+    let initial = game(
+        r#"
+@ C C C
+
+########
+
+"#,
+    );
+    for algorithm in ASTAR {
+        let result = solve(
+            &initial,
+            SolveOptions {
+                max_states: Some(100),
+                algorithm,
+                ..SolveOptions::default()
+            },
+        );
+        assert_eq!(result.outcome, SolveOutcome::StateLimitReached);
+        assert_eq!(result.stats.discovered_states, 100);
+        let cancelled = solve_cancellable(
+            &initial,
+            SolveOptions {
+                max_states: None,
+                algorithm,
+                ..SolveOptions::default()
+            },
+            |stats| {
+                if stats.expanded_states >= 10_000 {
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::Continue(())
+                }
+            },
+        );
+        assert_eq!(cancelled, None);
+    }
 }

@@ -425,6 +425,27 @@ impl GameState {
         self.status
     }
 
+    /// Rebuilds a state of the same level and rules from its dynamic parts.
+    /// The solver uses this to decode its compact state keys.
+    pub(crate) fn with_dynamic(
+        &self,
+        player: PlayerState,
+        cubes: Vec<Cube>,
+        inactive_red_cubes: Vec<Position>,
+        projectile: Option<Projectile>,
+        status: GameStatus,
+    ) -> Self {
+        Self {
+            level: Arc::clone(&self.level),
+            settings: self.settings,
+            player,
+            cubes,
+            inactive_red_cubes,
+            projectile,
+            status,
+        }
+    }
+
     /// Walls, feature bases, closed gates, and both kinds of cube are solid.
     /// A cube supplies ground support only when it is itself stably supported.
     pub fn is_solid(&self, position: Position) -> bool {
@@ -728,11 +749,17 @@ impl GameState {
     /// above a goal pedestal after the update.
     /// Won and game-over states ignore further inputs.
     pub fn step(&self, input: GameInput) -> Self {
+        self.step_reporting_push(input).0
+    }
+
+    /// Like [`Self::step`], also reporting whether a walk pushed any cube.
+    pub(crate) fn step_reporting_push(&self, input: GameInput) -> (Self, bool) {
         let mut next = self.clone();
         if next.status != GameStatus::Playing {
-            return next;
+            return (next, false);
         }
         let mut jumped = false;
+        let mut pushed_any = false;
         let mut walked_off_edge = false;
         // Bodies that moved sideways, and red cubes that appear in tiles they
         // left, fall only one tile this update.
@@ -746,17 +773,17 @@ impl GameState {
             } else if next.can_shoot() {
                 PlayerMode::Aiming
             } else {
-                return next;
+                return (next, false);
             };
-            return next;
+            return (next, false);
         } else if next.player.mode == PlayerMode::Aiming {
             let direction = match input {
                 GameInput::Left => Direction::Left,
                 GameInput::Right => Direction::Right,
-                _ => return next,
+                _ => return (next, false),
             };
             if !next.try_shoot(direction) {
-                return next;
+                return (next, false);
             }
             next.player.mode = PlayerMode::Recovering;
         } else {
@@ -771,6 +798,7 @@ impl GameState {
                     let occupied: Vec<_> = next.body_positions().collect();
                     if let Some(pushed) = next.try_walk(direction) {
                         walked_off_edge = was_grounded && !next.is_grounded();
+                        pushed_any = !pushed.is_empty();
                         late_cubes = pushed;
                         vacated = occupied
                             .into_iter()
@@ -835,7 +863,7 @@ impl GameState {
         {
             next.status = GameStatus::Won;
         }
-        next
+        (next, pushed_any)
     }
 
     /// Glass cubes are solid bodies but let projectiles pass through.

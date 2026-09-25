@@ -1,4 +1,6 @@
-use magicube_solver::{GameInput, GameState, GameStatus, SolveOptions, SolveOutcome, solve};
+use magicube_solver::{
+    GameInput, GameState, GameStatus, SolveOptions, SolveOutcome, solution_cost, solve,
+};
 
 fn assert_solver_matches_saved_solution(level: usize, map: &str, inputs: &str) {
     let initial = GameState::from_ascii(map).unwrap();
@@ -23,16 +25,14 @@ fn assert_solver_matches_saved_solution(level: usize, map: &str, inputs: &str) {
         GameStatus::Won,
         "level {level}: solver solution must win"
     );
+    let found_cost = solution_cost(&initial, found_inputs);
+    let saved_cost = solution_cost(&initial, &saved_inputs);
     assert!(
-        found_inputs.len() <= saved_inputs.len(),
-        "level {level}: solver took {} inputs, saved solution took {}",
-        found_inputs.len(),
-        saved_inputs.len(),
+        found_cost <= saved_cost,
+        "level {level}: solver solution costs {found_cost}, saved solution costs {saved_cost}",
     );
     eprintln!(
-        "Level {level}: solver {} inputs, saved {} inputs; {:?}",
-        found_inputs.len(),
-        saved_inputs.len(),
+        "Level {level}: solver cost {found_cost}, saved cost {saved_cost}; {:?}",
         result.stats,
     );
 }
@@ -64,12 +64,11 @@ fn solves_bundled_level_2_with_no_longer_solution() {
     assert_solver_matches_saved_solution(
         2,
         include_str!("../data/level-manual-labels/2.txt"),
-        "left left left shoot left wait jump left jump left jump
-         right right right right jump right right jump right
-         shoot left wait left jump left left jump left left
-         right right right left right right right right
-         jump right jump right right shoot right wait jump right
-         right shoot right wait",
+        "left left left shoot left wait jump left jump left jump right right
+         right right shoot right wait jump right right shoot left wait jump
+         left left jump left left right right right right left left right right
+         right right jump right jump right right shoot right wait jump right
+         right shoot right",
     );
 }
 
@@ -92,11 +91,11 @@ fn solves_bundled_level_4_with_no_longer_solution() {
     assert_solver_matches_saved_solution(
         4,
         include_str!("../data/level-manual-labels/4.txt"),
-        "right right right jump right right jump right right shoot left wait
-         jump left left left right right shoot right wait left right shoot
-         left wait jump left jump left jump left left right right right right
-         shoot right wait left right shoot left wait left left left left right
-         right right",
+        "right right right jump right jump right right right shoot left wait
+         jump left left left right shoot left wait right left right shoot left
+         wait jump left jump left jump left left right right right shoot left
+         wait right left right shoot left wait left left left left right right
+         right",
     );
 }
 
@@ -105,11 +104,12 @@ fn solves_bundled_level_5_with_no_longer_solution() {
     assert_solver_matches_saved_solution(
         5,
         include_str!("../data/level-manual-labels/5.txt"),
-        "jump right right right right right left left left left shoot left wait left left left jump left shoot right wait right right right
+        "right jump right right right right left left left left left left left
+         left shoot left wait jump left shoot right wait right right right
          right right right right right jump right shoot left wait jump left
          jump left jump left left left right right right right right shoot
          right wait right left left left left left left left left jump left
-         shoot left wait jump left jump left shoot left wait",
+         shoot left wait jump left jump left shoot left",
     );
 }
 
@@ -119,25 +119,23 @@ fn solves_bundled_level_6_with_no_longer_solution() {
         6,
         include_str!("../data/level-manual-labels/6.txt"),
         "right jump right right shoot right wait right jump right right left
-         left left jump left left jump left shoot right wait right jump right
-         right left right shoot left wait left left left",
+         left left jump left left left shoot right wait right jump right right
+         left right shoot left wait left left left",
     );
 }
 
 #[test]
 fn solves_bundled_level_7_with_no_longer_solution() {
-    // Recorded with both airborne options disabled in
-    // level-7-bundled-1789841583627-0.json (84 inputs).
     assert_solver_matches_saved_solution(
         7,
         include_str!("../data/level-manual-labels/7.txt"),
         "jump right right right jump right right left right shoot left wait
-         jump left left left right right left left left right right right
-         right right right left left left left left left jump left jump
-         right right right right right right right left left left right right
-         right jump right shoot left wait left jump left jump left left
-         left left left shoot right wait jump left jump right right right
-         right right right right right jump right right jump right shoot right wait",
+         jump left left left right right left left left right right right right
+         right right right left left left left left left jump left jump right
+         right right right right right right left left left right right right
+         jump right shoot left wait left jump left jump left left left left
+         left right shoot right wait jump left jump right right right right
+         right right right right right jump right jump right shoot right",
     );
 }
 
@@ -159,6 +157,9 @@ fn solves_bundled_level_18_with_no_longer_solution() {
     assert_solver_matches_saved_solution(
         18,
         map,
-        "right jump right right right right jump right shoot left wait right left left left left left jump left left right right left left shoot right wait jump right right jump right jump right shoot right wait left left right right right jump right right right right",
+        "right jump right right right right jump right shoot left wait right
+         left left left left left jump left left right right left left shoot
+         right wait jump right right jump right jump right shoot right wait
+         left left right right right right jump right right right right",
     );
 }

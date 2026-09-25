@@ -14,7 +14,7 @@ use crate::{
     GameInput, GameState, GameStatus, SolveOptions, SolveOutcome, SolveResult, SolveStats,
 };
 
-pub const SOLVER_CACHE_VERSION: u32 = 2;
+pub const SOLVER_CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct ProjectPaths {
@@ -111,14 +111,25 @@ pub fn load_manifest(path: &Path) -> Result<Vec<String>, Box<dyn Error>> {
 
 /// Rebuild all inferred maps and diagnostics without modifying trusted inputs.
 pub fn import_project(paths: &ProjectPaths) -> Result<ProjectImport, Box<dyn Error>> {
-    let expected = load_manifest(&paths.manifest)?;
-    let catalog = generate_catalog(&paths.screenshots, &paths.labels, &paths.atlas)?;
+    let (project, catalog) = read_project_and_catalog(paths)?;
     let levels_cache = paths.levels_cache();
     if levels_cache.exists() {
         fs::remove_dir_all(&levels_cache)?;
     }
     write_catalog_cache(&catalog, &levels_cache)?;
+    Ok(project)
+}
 
+/// Imports the project like [`import_project`], but writes nothing.
+pub fn read_project(paths: &ProjectPaths) -> Result<ProjectImport, Box<dyn Error>> {
+    Ok(read_project_and_catalog(paths)?.0)
+}
+
+fn read_project_and_catalog(
+    paths: &ProjectPaths,
+) -> Result<(ProjectImport, LevelCatalog), Box<dyn Error>> {
+    let expected = load_manifest(&paths.manifest)?;
+    let catalog = generate_catalog(&paths.screenshots, &paths.labels, &paths.atlas)?;
     let mut entries = catalog
         .entries
         .iter()
@@ -155,10 +166,11 @@ pub fn import_project(paths: &ProjectPaths) -> Result<ProjectImport, Box<dyn Err
             levels.push(level);
         }
     }
-    Ok(ProjectImport {
+    let project = ProjectImport {
         levels,
         expected_count: expected.len(),
-    })
+    };
+    Ok((project, catalog))
 }
 
 fn project_level(entry: &CatalogEntry, listed: bool) -> ProjectLevel {
@@ -246,6 +258,7 @@ pub enum CachedSolveOutcome {
     Solved { inputs: Vec<String> },
     Unsolvable,
     StateLimitReached,
+    DepthLimitReached,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -282,6 +295,7 @@ impl SolverCacheRecord {
             },
             SolveOutcome::Unsolvable => CachedSolveOutcome::Unsolvable,
             SolveOutcome::StateLimitReached => CachedSolveOutcome::StateLimitReached,
+            SolveOutcome::DepthLimitReached => CachedSolveOutcome::DepthLimitReached,
         };
         Self {
             format_version: SOLVER_CACHE_VERSION,
@@ -342,7 +356,11 @@ impl SolverCacheRecord {
         // An exhausted search is final under any limit, and hitting a limit at
         // least as large as the requested one would happen again.
         let limit_covers = match self.outcome {
-            CachedSolveOutcome::Solved { .. } => return false,
+            // The cache does not record the depth limit, so it cannot tell
+            // whether a longer search would succeed.
+            CachedSolveOutcome::Solved { .. } | CachedSolveOutcome::DepthLimitReached => {
+                return false;
+            }
             CachedSolveOutcome::Unsolvable => true,
             CachedSolveOutcome::StateLimitReached => match (self.max_states, options.max_states) {
                 (None, _) => true,
@@ -480,10 +498,14 @@ mod tests {
         };
         assert!(failed.reusable_failure("1", map, SolveOptions::default(), "old"));
         assert!(!failed.reusable_failure("1", map, SolveOptions::default(), "new"));
-        let unlimited = SolveOptions { max_states: None };
+        let unlimited = SolveOptions {
+            max_states: None,
+            ..SolveOptions::default()
+        };
         assert!(!failed.reusable_failure("1", map, unlimited, "old"));
         let small = SolveOptions {
             max_states: Some(10),
+            ..SolveOptions::default()
         };
         assert!(failed.reusable_failure("1", map, small, "old"));
 

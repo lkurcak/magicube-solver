@@ -270,7 +270,10 @@ fn run() -> Result<(), Box<dyn Error>> {
                 } else {
                     SolveOptions::default().max_states
                 };
-                if let Some(request) = dashboard.request_solve(SolveOptions { max_states }) {
+                if let Some(request) = dashboard.request_solve(SolveOptions {
+                    max_states,
+                    ..SolveOptions::default()
+                }) {
                     // A worker that already failed reports it in the message line.
                     let _ = requests.send(request);
                 }
@@ -364,7 +367,9 @@ fn worker_inner(
                 CachedSolveOutcome::StateLimitReached => {
                     WorkerEvent::LimitReached(level.id, true, stats(record))
                 }
-                CachedSolveOutcome::Solved { .. } => unreachable!(),
+                CachedSolveOutcome::Solved { .. } | CachedSolveOutcome::DepthLimitReached => {
+                    unreachable!("never reused")
+                }
             };
             sender.send(event)?;
             continue;
@@ -459,7 +464,10 @@ fn worker_inner(
         let event = match result.outcome {
             SolveOutcome::Solved(inputs) => WorkerEvent::Solved(id, inputs, false, result.stats),
             SolveOutcome::Unsolvable => WorkerEvent::Unsolvable(id, false, result.stats),
-            SolveOutcome::StateLimitReached => WorkerEvent::LimitReached(id, false, result.stats),
+            // The dashboard never sets a depth limit.
+            SolveOutcome::StateLimitReached | SolveOutcome::DepthLimitReached => {
+                WorkerEvent::LimitReached(id, false, result.stats)
+            }
         };
         sender.send(event)?;
     }
@@ -710,7 +718,10 @@ mod tests {
             stats,
         ));
 
-        let unlimited = SolveOptions { max_states: None };
+        let unlimited = SolveOptions {
+            max_states: None,
+            ..SolveOptions::default()
+        };
         let Some(Request::Solve { id, options }) = dashboard.request_solve(unlimited) else {
             panic!("clean levels can be re-solved");
         };

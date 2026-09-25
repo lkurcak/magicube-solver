@@ -73,6 +73,9 @@ impl Replay {
             SolveOutcome::StateLimitReached => Err(io::Error::other(
                 "solver reached its state limit; no complete solution found",
             )),
+            SolveOutcome::DepthLimitReached => Err(io::Error::other(
+                "solver reached its depth limit; no complete solution found",
+            )),
         }
     }
 
@@ -156,7 +159,7 @@ pub fn solve_and_run(out: &mut impl Write, name: &str, map: &str) -> io::Result<
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut app = App::new(initial);
     app.notification = Some(Notification {
-        text: "Finding a shortest solution...".to_owned(),
+        text: "Finding a cheapest solution...".to_owned(),
         error: false,
     });
     render::draw(out, crossterm::terminal::size()?, &app, name)?;
@@ -386,7 +389,8 @@ mod tests {
             Replay::from_solver(
                 initial,
                 SolveOptions {
-                    max_states: Some(0)
+                    max_states: Some(0),
+                    ..SolveOptions::default()
                 }
             )
             .is_err()

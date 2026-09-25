@@ -82,14 +82,35 @@ take a very long time on maps with many cubes and can use a lot of memory, so ca
 **C**. A cached state-limit failure is reused only when its limit is at least the
 default one. A cached exhausted (unsolvable) search is reused under any limit.
 
-Print level 1 with the original prototype binary:
+## Comparing solver algorithms
+
+`magicube-solver` solves levels non-interactively and prints one row per level
+with the outcome, solution length and cost, discovered and expanded states, and solve
+time. Build it in release mode for meaningful timings:
 
 ```sh
-cargo run --bin magicube-solver
+cargo run --release --bin magicube-solver -- 1 2 29 --no-cache --max-states unlimited
+cargo run --release --bin magicube-solver -- 1 2 29 --no-cache --max-states unlimited --algorithm bfs
 ```
 
-The search engine is available through the Rust library API and the terminal
-player's `--solve` replay mode described below.
+Arguments are project level IDs or paths to ASCII maps; with none, every clean
+project level is solved. Levels are imported without writing `cache/`. By default,
+solutions already cached by the progress dashboard are reused and shown as
+`cached`. `--no-cache` searches every level. The command never writes the cache.
+
+| Option | Meaning |
+| --- | --- |
+| `--algorithm bfs\|astar` | Breadth-first or A* (default) search |
+| `--heuristic zero\|goal-distance\|player-distance` | A* estimate; `zero` (default) makes A* a uniform-cost search; `player-distance` is inadmissible, so solutions may be costlier |
+| `--weight W` | A* heuristic weight (default 1). Above 1 may return costlier solutions |
+| `--max-states N\|unlimited` | Distinct-state limit per level (default 1000000) |
+| `--max-depth N\|unlimited` | Costliest solution to search for; BFS counts moves (default unlimited) |
+
+A* with weight 1 always returns cheapest solutions; BFS ignores costs and does
+not. The goal-distance heuristic bounds the cost still needed using horizontal
+distances to the goal columns. A single shot can move the cube far, so the bound is weak and prunes only a few
+percent of the states. The search engine is also available through the Rust
+library API and the terminal player's `--solve` replay mode described below.
 
 Open the interactive level selector for the bundled levels:
 
@@ -252,7 +273,7 @@ with `--replay` or `--solve`.
 Unsupported format versions, malformed inputs, and a final outcome that
 differs from the saved outcome produce an error before entering the replay.
 
-Find a shortest solution and open it in the same replay viewer:
+Find a cheapest solution and open it in the same replay viewer:
 
 ```sh
 cargo run --release -p magicube-play -- --solve data/level-manual-labels/4.txt
@@ -315,12 +336,13 @@ match result.outcome {
 println!("Search statistics: {:?}", result.stats);
 ```
 
-The synchronous, single-threaded breadth-first search returns a shortest sequence
-of `GameInput` entries. Every entry costs one, including entering/cancelling aim
-and forced recovery (recorded explicitly as `Wait`). This minimizes recorded
-inputs, not elapsed simulation updates. Equally short solutions are selected
-deterministically using left, right, jump, shoot, wait order; recovery always uses
-wait. Returned inputs replay directly through `GameState::step`.
+The synchronous, single-threaded uniform-cost (A* without a heuristic) search returns a cheapest sequence of
+`GameInput` entries. Every entry costs one, including aiming and forced recovery
+(recorded explicitly as `Wait`), except that a walk pushing cubes costs two;
+`solution_cost` computes this. The search takes a whole shot (`Shoot`, a
+direction, `Wait`) as one move, so aiming and recovering states are never
+stored. Equally cheap moves are tried in left, right, jump, shoot left, shoot
+right, wait order. Returned inputs replay directly through `GameState::step`.
 
 `GameState::from_ascii` uses `GameSettings::default()`, with airborne shooting
 and pushing disabled. The library search follows its initial state's rules; deliberately
@@ -350,10 +372,10 @@ discarded game-over successors) and `expanded_states` (states whose successor
 generation began, including a partially processed final state). Terminal starts
 and a zero-cap search report zero for both counts.
 
-The normal test suite solves bundled levels 1–7 using the default state cap,
-replays both saved and solver solutions, and checks that each solver solution
-uses no more inputs than its saved counterpart. To run only those regressions
-with optimizations and display their input and search counts:
+The normal test suite solves bundled levels 1–7 and 18 using the default state
+cap, replays both saved and solver solutions, and checks that each solver
+solution costs no more than its saved counterpart. To run only those regressions
+with optimizations and display their costs and search counts:
 
 ```sh
 cargo test --release --locked --test solutions -- --nocapture
