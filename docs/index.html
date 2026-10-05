@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magicube solutions</title>
+<style>
+  :root {
+    --fg: #c0c0c0;
+    --dim: #808080;
+    --hi: #ffffff;
+    --accent: #55ffff;
+  }
+  html, body {
+    margin: 0;
+    background: #000000;
+    color: var(--fg);
+    font: 16px/1.25 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  }
+  body { padding: 16px; }
+  pre { margin: 0; font: inherit; white-space: pre; }
+  a { color: inherit; text-decoration: none; cursor: pointer; }
+  a:hover { color: var(--hi); }
+  .dim { color: var(--dim); }
+  .hi { color: var(--hi); }
+  .sel { color: #000; background: var(--fg); }
+  .bad { color: #ff5555; }
+  #levels { white-space: pre-wrap; }
+  #map { overflow-x: auto; margin: 1em 0; }
+  #actions { white-space: pre-wrap; word-break: break-all; }
+  #help { white-space: pre-wrap; }
+  .w { color: #c0c0c0; } .W { color: #ffffff; } .k { color: #808080; }
+  .r { color: #ff5555; } .R { color: #aa0000; } .g { color: #55ff55; }
+  .y { color: #ffff55; } .b { color: #5c5cff; } .B { color: #3b3bc8; }
+  .m { color: #ff55ff; } .c { color: #55ffff; } .C { color: #00aaaa; }
+</style>
+</head>
+<body>
+<pre id="header">MAGICUBE SOLUTIONS
+loading solutions.json...</pre>
+<pre id="levels"></pre>
+<pre id="map"></pre>
+<pre id="status"></pre>
+<pre id="controls"></pre>
+<pre id="actions"></pre>
+<pre id="help" class="dim"></pre>
+<script>
+"use strict";
+
+const ACTION_NAMES = {
+  L: "left", R: "right", J: "jump", A: "aim", C: "cancel aim",
+  "<": "fire left", ">": "fire right", W: "wait", "~": "recover",
+};
+const ACTION_GLYPHS = {
+  L: "←", R: "→", J: "↑", A: "x", C: "c",
+  "<": "⇤", ">": "⇥", W: "·", "~": "~",
+};
+const PLAYBACK_MS = 250;
+
+let levels = [];
+let current = 0;
+let step = 0;
+let timer = null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+function link(text, handler, className) {
+  const a = document.createElement("a");
+  a.textContent = text;
+  if (className) a.className = className;
+  a.addEventListener("click", handler);
+  return a;
+}
+
+function renderLevels() {
+  const el = $("levels");
+  el.replaceChildren();
+  levels.forEach((level, index) => {
+    const label = level.id.padStart(2, " ");
+    const className = index === current ? "sel" : level.status === "solved" ? "" : "bad";
+    el.append(link(label, () => select(index, 0), className), " ");
+  });
+}
+
+function renderFrame() {
+  const level = levels[current];
+  const frames = level.frames || [];
+  const header = `MAGICUBE SOLUTIONS   ${levels.filter((l) => l.status === "solved").length}/${levels.length} solved`;
+  $("header").textContent = header + "\n";
+
+  if (frames.length === 0) {
+    $("map").textContent = level.map || "";
+    $("status").innerHTML = `<span class="hi">${esc(level.name)}</span>  <span class="bad">${esc(level.status)}</span>` +
+      (level.issues && level.issues.length ? "\n" + esc(level.issues.join("\n")) : "");
+    $("controls").textContent = "";
+    $("actions").textContent = "";
+    return;
+  }
+
+  const frame = frames[step];
+  let html = "";
+  for (let i = 0; i < frame.text.length; i++) {
+    const ch = frame.text[i];
+    const cls = frame.colors[i];
+    if (ch === "\n") html += "\n";
+    else if (cls === "." ) html += esc(ch);
+    else html += `<span class="${cls}">${esc(ch)}</span>`;
+  }
+  $("map").innerHTML = html;
+
+  const total = level.actions.length;
+  const last = step > 0 ? ACTION_NAMES[level.actions[step - 1]] : "start";
+  const next = step < total ? ACTION_NAMES[level.actions[step]] : (frames.length ? "won" : "");
+  $("status").innerHTML =
+    `<span class="hi">${esc(level.name)}</span>  step ${String(step).padStart(3)}/${total}  cost ${level.cost}\n` +
+    `last: ${last.padEnd(11)} next: <span class="hi">${next}</span>`;
+
+  const controls = $("controls");
+  controls.replaceChildren(
+    "\n",
+    link("[|<]", () => seek(0)), " ",
+    link("[<<]", () => seek(step - 10)), " ",
+    link("[<]", () => seek(step - 1)), " ",
+    link(timer ? "[pause]" : "[play] ", togglePlay), " ",
+    link("[>]", () => seek(step + 1)), " ",
+    link("[>>]", () => seek(step + 10)), " ",
+    link("[>|]", () => seek(total)),
+    "   ",
+    link("[prev level]", () => select(current - 1, 0)), " ",
+    link("[next level]", () => select(current + 1, 0)),
+    "\n\n",
+  );
+
+  const actions = $("actions");
+  actions.replaceChildren();
+  [...level.actions].forEach((action, index) => {
+    const className = index === step - 1 ? "sel" : action === "~" ? "dim" : index < step - 1 ? "dim" : "";
+    actions.append(link(ACTION_GLYPHS[action], () => seek(index + 1), className));
+  });
+}
+
+function render() {
+  renderLevels();
+  renderFrame();
+}
+
+function select(index, newStep) {
+  if (levels.length === 0) return;
+  current = (index + levels.length) % levels.length;
+  step = 0;
+  stop();
+  seek(newStep);
+}
+
+function seek(newStep) {
+  const level = levels[current];
+  const total = level.actions ? level.actions.length : 0;
+  step = Math.max(0, Math.min(total, newStep));
+  if (step === total) stop();
+  const hash = `#${level.id}` + (step ? `/${step}` : "");
+  if (location.hash !== hash) history.replaceState(null, "", hash);
+  render();
+}
+
+function stop() {
+  clearInterval(timer);
+  timer = null;
+}
+
+function togglePlay() {
+  const level = levels[current];
+  if (timer) {
+    stop();
+    render();
+    return;
+  }
+  if (!level.actions) return;
+  if (step >= level.actions.length) step = 0;
+  timer = setInterval(() => seek(step + 1), PLAYBACK_MS);
+  render();
+}
+
+function fromHash() {
+  const [id, at] = location.hash.slice(1).split("/");
+  const index = levels.findIndex((level) => level.id === id);
+  select(index >= 0 ? index : 0, parseInt(at, 10) || 0);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.ctrlKey || event.metaKey || event.altKey || levels.length === 0) return;
+  const keys = {
+    ArrowLeft: () => seek(step - 1),
+    ArrowRight: () => seek(step + 1),
+    PageUp: () => seek(step - 10),
+    PageDown: () => seek(step + 10),
+    Home: () => seek(0),
+    End: () => seek(Infinity),
+    " ": togglePlay,
+    ArrowUp: () => select(current - 1, 0),
+    ArrowDown: () => select(current + 1, 0),
+    k: () => select(current - 1, 0),
+    j: () => select(current + 1, 0),
+  };
+  const action = keys[event.key];
+  if (action) {
+    event.preventDefault();
+    action();
+  }
+});
+window.addEventListener("hashchange", fromHash);
+
+$("help").textContent =
+  "\n\nkeys: left/right step  pgup/pgdn 10 steps  home/end  space play  up/down or j/k level\n" +
+  "moves: ← left  → right  ↑ jump  x aim  c cancel aim  ⇤ fire left  ⇥ fire right  · wait  ~ automatic recovery\n" +
+  "tiles: @ player  O your cube  C cube  g glass  b blue  r red  G goal  P plate  R red plate  D gate  T trigger  {^}v lasers  S skull  t torch";
+
+fetch("solutions.json")
+  .then((response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  })
+  .then((pack) => {
+    levels = pack.levels;
+    fromHash();
+  })
+  .catch((error) => {
+    $("header").textContent = `MAGICUBE SOLUTIONS\nfailed to load solutions.json: ${error.message}`;
+  });
+</script>
+</body>
+</html>

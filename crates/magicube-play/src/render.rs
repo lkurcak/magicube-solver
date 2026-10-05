@@ -272,46 +272,53 @@ fn draw_board(
                 x: origin.x + x as isize,
                 y: origin.y + y as isize,
             };
-            let mut glyph = state.symbol_at(position);
-            // Beams are derived each frame, so level files never contain them.
-            if glyph == ' ' {
-                glyph = match state.laser_beam_at(position) {
-                    Some(LaserBeam::Horizontal) => '-',
-                    Some(LaserBeam::Vertical) => '|',
-                    Some(LaserBeam::Crossing) => '+',
-                    None => ' ',
-                };
-            }
-            let color = match glyph {
-                '@' if state.status() == GameStatus::GameOver => Color::Red,
-                '@' => Color::Cyan,
-                '#' => Color::Grey,
-                'D' if state.is_solid(position) => Color::White,
-                'D' => Color::DarkGrey,
-                'P' => Color::Yellow,
-                'C' => Color::Blue,
-                'g' => Color::DarkCyan,
-                'b' => Color::DarkBlue,
-                'r' if state.inactive_red_cubes().contains(&position) => Color::DarkRed,
-                'r' => Color::Red,
-                'R' => Color::DarkRed,
-                'O' if level.is_goal(position) => Color::Green,
-                'O' => Color::Magenta,
-                '<' | '>' => Color::Yellow,
-                'G' => Color::Green,
-                'S' => Color::Red,
-                't' => Color::Yellow,
-                '{' | '}' | '^' | 'v' | '-' | '|' | '+' => Color::Red,
-                'T' if state.laser_trigger_lit(position) => Color::White,
-                'T' => Color::DarkGrey,
-                '?' => Color::Magenta,
-                _ => Color::Reset,
-            };
+            let (glyph, color) = cell(state, position);
             queue!(out, SetForegroundColor(color), Print(glyph))?;
         }
     }
     queue!(out, ResetColor)?;
     out.flush()
+}
+
+/// The glyph and color drawn for one map cell, including derived laser beams.
+pub fn cell(state: &GameState, position: Position) -> (char, Color) {
+    let level = state.level();
+    let mut glyph = state.symbol_at(position);
+    // Beams are derived each frame, so level files never contain them.
+    if glyph == ' ' {
+        glyph = match state.laser_beam_at(position) {
+            Some(LaserBeam::Horizontal) => '-',
+            Some(LaserBeam::Vertical) => '|',
+            Some(LaserBeam::Crossing) => '+',
+            None => ' ',
+        };
+    }
+    let color = match glyph {
+        '@' if state.status() == GameStatus::GameOver => Color::Red,
+        '@' => Color::Cyan,
+        '#' => Color::Grey,
+        'D' if state.is_solid(position) => Color::White,
+        'D' => Color::DarkGrey,
+        'P' => Color::Yellow,
+        'C' => Color::Blue,
+        'g' => Color::DarkCyan,
+        'b' => Color::DarkBlue,
+        'r' if state.inactive_red_cubes().contains(&position) => Color::DarkRed,
+        'r' => Color::Red,
+        'R' => Color::DarkRed,
+        'O' if level.is_goal(position) => Color::Green,
+        'O' => Color::Magenta,
+        '<' | '>' => Color::Yellow,
+        'G' => Color::Green,
+        'S' => Color::Red,
+        't' => Color::Yellow,
+        '{' | '}' | '^' | 'v' | '-' | '|' | '+' => Color::Red,
+        'T' if state.laser_trigger_lit(position) => Color::White,
+        'T' => Color::DarkGrey,
+        '?' => Color::Magenta,
+        _ => Color::Reset,
+    };
+    (glyph, color)
 }
 
 /// Keep the map steady when it fits, otherwise follow the player. Open edges

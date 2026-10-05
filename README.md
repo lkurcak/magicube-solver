@@ -314,6 +314,43 @@ Paused recovery frames stay paused until you advance them. Replays never save
 new attempts or modify the recorded sequence, and normal gameplay keys such as
 jump, shoot, and save are inactive in the viewer.
 
+## Solutions website
+
+`docs/` is a static GitHub Pages site that replays every level's solution as
+colored ASCII on a black terminal-style page. It needs no build step: enable
+Pages for the repository with **Deploy from a branch**, branch `main`, folder
+`/docs`. To preview it locally, serve the folder (browsers block `fetch` from
+`file://`):
+
+```sh
+python3 -m http.server -d docs
+```
+
+`docs/solutions.json` is the packed, committed record of every solution. Each
+level holds its map, cost, raw inputs, what each input does, and pre-rendered
+frames with the same colors as the terminal player, so the page needs no
+simulator. Regenerate it after changing levels or game rules:
+
+```sh
+cargo run --release -p magicube-play --bin magicube-pack
+```
+
+The packer reuses a level's solution from the existing pack, then from the
+progress dashboard's cache, as long as it still wins on the current map; other
+levels are solved with no state limit. `--resolve` searches every level again,
+`--max-states N` sets a limit, and `--output PATH` writes elsewhere. It exits
+unsuccessfully if any level is corrupted or unsolved, but still writes the pack.
+
+The page's URL hash selects a level and step, e.g. `#29/40`.
+
+| Key | Website action |
+| --- | --- |
+| Left / Right | Back or forward one input |
+| Page Up / Page Down | Back or forward ten inputs |
+| Home / End | Initial or final state |
+| Space | Play or pause |
+| Up / Down or K / J | Previous or next level |
+
 ## Solver library
 
 `solve` searches from any `GameState`, including one that is already aiming or
