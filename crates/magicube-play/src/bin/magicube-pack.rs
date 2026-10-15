@@ -74,14 +74,14 @@ fn main() -> ExitCode {
         .ancestors()
         .nth(2)
         .expect("crate lives two levels below the workspace root");
-    let options = match parse_args(&root) {
+    let options = match parse_args(root) {
         Ok(options) => options,
         Err(message) => {
             eprintln!("magicube-pack: {message}\n\n{USAGE}");
             return ExitCode::FAILURE;
         }
     };
-    match run(&root, &options) {
+    match run(root, &options) {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(error) => {
