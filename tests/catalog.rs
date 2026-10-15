@@ -153,8 +153,11 @@ fn a_new_teaching_example_repairs_other_levels_and_conflicts_remain_visible() {
     for entry in catalog.entries {
         assert!(!entry.is_clean());
         let report = entry.issues.join("\n");
-        assert!(report.contains("labels/1.txt at (3, 0)"));
-        assert!(report.contains("labels/2.txt at (3, 0)"));
+        for id in ["1", "2"] {
+            // The report shows paths the way the OS writes them.
+            let label = PathBuf::from("labels").join(format!("{id}.txt"));
+            assert!(report.contains(&format!("{} at (3, 0)", label.display())));
+        }
     }
     fs::write(fixture.0.join("labels/1.txt"), "#@G?").unwrap();
     assert!(
